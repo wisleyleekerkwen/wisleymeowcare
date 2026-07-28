@@ -178,7 +178,7 @@
 <script>
 /* ---------------- constants ---------------- */
 const DEFAULT_REMARKS = "1. 洗碗+加猫粮\n2. 洗碗+加水\n3. wetfood\n4. 打扫+清理猫砂\n5. 陪玩 (若猫咪需要)";
-const DEFAULT_TASK_OPTIONS = ['洗碗+加猫粮','洗碗+加水','喂 wetfood','打扫+清理猫砂','陪玩 (若猫咪需要)','喂药 Medication','梳毛 Grooming'];
+const DEFAULT_TASK_OPTIONS = ['洗碗+加猫粮 wash bowl & refill kibbles','洗碗+加水 wash bowl & refill water','准备湿粮 provide wetfood','打扫+清理猫砂 Clean litter box','陪玩 (若猫咪需要) Play time','喂药 Medication','梳毛 Grooming'];
 function visitRemarksText(v){
   const lines=[];
   if(v.tasks && v.tasks.length) v.tasks.forEach((t,i)=> lines.push((i+1)+'. '+t));
@@ -943,27 +943,37 @@ function invStatus(inv){
   return {label:'待付款', cls:'gray'};
 }
 function renderDocList(type){
-  const list = type==='invoice'? DB.invoices : DB.quotes;
+  let list = type==='invoice'? DB.invoices : DB.quotes;
+  const q = (window.__docQuery||'').toLowerCase();
+  if(q){
+    list = list.filter(d=>{
+      const c = DB.clients.find(x=>x.id===d.clientId);
+      const name = (c?c.name:(d.leadName||'')).toLowerCase();
+      return name.includes(q) || (d.no||'').toLowerCase().includes(q);
+    });
+  }
+  const searchBox = `<input placeholder="搜索客户姓名或单号 Search by client name or no." value="${window.__docQuery||''}" oninput="window.__docQuery=this.value; render();" style="margin-bottom:12px;">`;
   if(type==='invoice'){
     const outstanding = list.reduce((s,i)=>{ const t=docTotal(i); const p=(i.payments||[]).reduce((a,b)=>a+Number(b.amount),0); return s+Math.max(t-p,0); },0);
     return `
+    ${searchBox}
     <div class="statgrid" style="margin-bottom:14px;">
       <div class="statcard"><div class="v">${list.length}</div><div class="l">账单总数</div></div>
       <div class="statcard"><div class="v" style="color:var(--peach-dark)">${fmt(outstanding)}</div><div class="l">未收款项</div></div>
     </div>
-    ${list.length? list.slice().reverse().map(i=>invoiceRow(i)).join('') : `<div class="card empty"><span class="emoji">🧾</span>还没有账单，点击右下角 ＋ 新建</div>`}
+    ${list.length? list.slice().reverse().map(i=>invoiceRow(i)).join('') : `<div class="card empty"><span class="emoji">🧾</span>${q?'没找到符合的账单 No matching invoices':'还没有账单，点击右下角 ＋ 新建'}</div>`}
     `;
   }
   const stmap={draft:['gray','草稿'],sent:['orange','已发送'],accepted:['green','已接受']};
-  return list.length? list.slice().reverse().map(q=>{
-    const c = DB.clients.find(x=>x.id===q.clientId); const st = stmap[q.status||'draft'];
-    return `<div class="card tap" onclick="state.quoteId='${q.id}'; render();">
+  return searchBox + (list.length? list.slice().reverse().map(qt=>{
+    const c = DB.clients.find(x=>x.id===qt.clientId); const st = stmap[qt.status||'draft'];
+    return `<div class="card tap" onclick="state.quoteId='${qt.id}'; render();">
       <div class="row">
-        <div><div style="font-weight:800;">${q.no}</div><div class="muted">${c?c.name:(q.leadName||'未命名客户')} · ${q.startDate||'—'} ~ ${q.endDate||'—'}</div></div>
-        <div style="text-align:right;"><div style="font-weight:800;">${fmt(docTotal(q))}</div><span class="pill ${st[0]}">${st[1]}</span></div>
+        <div><div style="font-weight:800;">${qt.no}</div><div class="muted">${c?c.name:(qt.leadName||'未命名客户')} · ${qt.startDate||'—'} ~ ${qt.endDate||'—'}</div></div>
+        <div style="text-align:right;"><div style="font-weight:800;">${fmt(docTotal(qt))}</div><span class="pill ${st[0]}">${st[1]}</span></div>
       </div>
     </div>`;
-  }).join('') : `<div class="card empty"><span class="emoji">📝</span>还没有报价单，点击右下角 ＋ 新建</div>`;
+  }).join('') : `<div class="card empty"><span class="emoji">📝</span>${q?'没找到符合的报价 No matching quotes':'还没有报价单，点击右下角 ＋ 新建'}</div>`);
 }
 function invoiceRow(inv){
   const c = DB.clients.find(x=>x.id===inv.clientId); const st = invStatus(inv);
@@ -1103,8 +1113,18 @@ function renderTaskOptionsManage(){
     <div class="card" style="background:var(--card-alt); margin-bottom:12px;">
       ${(DB.settings.taskOptions||[]).map((t,idx)=>`<div class="row" style="margin-bottom:8px; gap:8px;"><div class="pill" style="flex:1; justify-content:flex-start; font-weight:700;">${t}</div><button class="miniremove" onclick="removeTaskOptionInline(${idx})">✕</button></div>`).join('')}
       <input id="f_task_inline_new" placeholder="新增服务细节，例如：清理猫爬架">
-      <button class="btn btn-soft btn-block" style="margin-bottom:0;" onclick="addTaskOptionInline()">＋ 添加选项</button>
+      <button class="btn btn-soft btn-block" style="margin-bottom:8px;" onclick="addTaskOptionInline()">＋ 添加选项</button>
+      <button class="btn btn-outline btn-block" style="margin-bottom:0;" onclick="resetTaskOptionsInline()">↺ 恢复默认列表 Reset to default</button>
     </div>`;
+}
+function resetTaskOptionsInline(){
+  confirmAction('确定要恢复成默认服务细节清单吗？你自己加的项目会被清掉。<br>Reset to the default list? Any custom items you added will be removed.', ()=>{
+    DB.settings.taskOptions = DEFAULT_TASK_OPTIONS.slice();
+    save('settings');
+    renderTaskOptionsManage();
+    renderVisitRows();
+    toast('已恢复默认列表 Reset done');
+  });
 }
 function addTaskOptionInline(){
   const t = val('f_task_inline_new').trim();
@@ -1120,6 +1140,27 @@ function removeTaskOptionInline(idx){
   save('settings');
   renderTaskOptionsManage();
   renderVisitRows();
+}
+function addTaskOption(){
+  const t = val('f_task_new').trim();
+  if(!t){ toast('请输入内容'); return; }
+  if(!DB.settings.taskOptions) DB.settings.taskOptions=[];
+  DB.settings.taskOptions.push(t);
+  save('settings');
+  document.getElementById('modalCard').innerHTML = settingsHTML();
+}
+function removeTaskOption(idx){
+  DB.settings.taskOptions.splice(idx,1);
+  save('settings');
+  document.getElementById('modalCard').innerHTML = settingsHTML();
+}
+function resetTaskOptions(){
+  confirmAction('确定要恢复成默认服务细节清单吗？你自己加的项目会被清掉。<br>Reset to the default list? Any custom items you added will be removed.', ()=>{
+    DB.settings.taskOptions = DEFAULT_TASK_OPTIONS.slice();
+    save('settings');
+    document.getElementById('modalCard').innerHTML = settingsHTML();
+    toast('已恢复默认列表 Reset done');
+  });
 }
 function renderVisitRows(){
   const wrap = document.getElementById('visitsWrap'); if(!wrap) return;
@@ -1234,6 +1275,7 @@ function renderDocDetail(type, id){
     <button class="btn btn-primary btn-block" onclick="openPaymentForm('${doc.id}')">💵 记录付款 Record Payment</button>
     <button class="btn btn-outline btn-block" onclick="genPDF('invoice','${doc.id}')">⤓ 生成 PDF</button>
   </div>
+  <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="duplicateDoc('invoice','${doc.id}')">📋 复制这张账单，建一张新的 Duplicate this invoice</div>
   ${doc.scheduleSynced? `<div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="resyncInvoiceSchedule('${doc.id}')">🧹 日程重复了？点此重新整理 / Clean up duplicate schedule</div>` : ''}
   <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="genPDF('invoice','${doc.id}','inline')">👁 在这里预览PDF内容 Preview here (works inside Claude)</div>
   <div class="muted" style="text-align:center; margin:-4px 0 10px; font-size:12px; line-height:1.6;">手机上：PDF会在新页面打开，点分享图标 → 存储到"文件"App 保存<br>On phone: PDF opens in a new tab — tap Share → Save to Files</div>` : `
@@ -1245,6 +1287,7 @@ function renderDocDetail(type, id){
     <button class="btn btn-outline btn-block" onclick="genPDF('quote','${doc.id}')">⤓ 生成 PDF</button>
     <button class="btn btn-peach btn-block" onclick="convertToInvoice('${doc.id}')">转为账单 To Invoice</button>
   </div>
+  <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="duplicateDoc('quote','${doc.id}')">📋 复制这张报价，建一张新的 Duplicate this quote</div>
   <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="genPDF('quote','${doc.id}','inline')">👁 在这里预览PDF内容 Preview here (works inside Claude)</div>
   <div class="muted" style="text-align:center; margin:-4px 0 10px; font-size:12px; line-height:1.6;">手机上：PDF会在新页面打开，点分享图标 → 存储到"文件"App 保存<br>On phone: PDF opens in a new tab — tap Share → Save to Files</div>`}
   <div class="row" style="gap:8px; margin-bottom:14px;">
@@ -1263,6 +1306,31 @@ function deleteDoc(type,id){
   });
 }
 function setQuoteStatus(id, status){ const q = DB.quotes.find(x=>x.id===id); q.status=status; save('quotes'); render(); toast('状态已更新'); }
+function duplicateDoc(type, id){
+  const list = type==='invoice'? DB.invoices : DB.quotes;
+  const src = list.find(x=>x.id===id);
+  if(!src) return;
+  const clone = JSON.parse(JSON.stringify(src));
+  clone.id = uid();
+  clone.visits = (clone.visits||[]).map(v=>({...v, id:uid()}));
+  clone.payments = [];
+  clone.scheduleSynced = false;
+  if(type==='invoice'){
+    clone.no = 'INV-'+new Date().getFullYear()+'-'+String(DB.settings.invoiceSeq++).padStart(3,'0');
+    DB.invoices.push(clone);
+    save('invoices'); save('settings');
+    state.moneyTab='invoices'; state.invId=clone.id;
+  } else {
+    clone.no = 'Q-'+new Date().getFullYear()+'-'+String(DB.settings.quoteSeq++).padStart(3,'0');
+    clone.status = 'draft';
+    DB.quotes.push(clone);
+    save('quotes'); save('settings');
+    state.moneyTab='quotes'; state.quoteId=clone.id;
+  }
+  render();
+  toast('已复制，改好日期/价格再保存 Duplicated — adjust dates/prices then save');
+  openDocForm(type, clone.id);
+}
 function convertToInvoice(qid){
   const q = DB.quotes.find(x=>x.id===qid);
   if(q.clientId){ doConvertToInvoice(qid, q.clientId); return; }
@@ -1548,6 +1616,19 @@ function renderReports(){
     <div style="font-size:26px; font-weight:800; color:${(curData.income-curData.expense)>=0?'var(--sage-dark)':'var(--danger)'};">${fmt(curData.income-curData.expense)}</div>
   </div>
 
+  ${(()=>{
+    const byCat = {};
+    expensesInMonth.forEach(e=>{ byCat[e.category] = (byCat[e.category]||0) + Number(e.amount||0); });
+    const cats = Object.keys(byCat);
+    if(!cats.length) return '';
+    return `<div class="card" style="margin-bottom:14px;">
+      <h3>🧾 ${sel} 开销种类明细 Expenses by Category</h3>
+      ${cats.map(cat=>`<div class="row" style="padding:4px 0;"><span>${cat}</span><span style="font-weight:800;">${fmt(byCat[cat])}</span></div>`).join('')}
+      <div class="divider"></div>
+      <div class="row" style="font-weight:800;"><span>合计 Total</span><span>${fmt(curData.expense)}</span></div>
+    </div>`;
+  })()}
+
   <div class="card" style="margin-bottom:14px;">
     <h3>📈 近12个月走势 Trend</h3>
     <div class="row" style="gap:14px; margin-bottom:10px; font-size:11.5px;">
@@ -1568,19 +1649,43 @@ function renderReports(){
   ${incomeRows}
 
   <h3 style="margin:16px 2px 8px;">🧾 ${sel} 开销记录 Expenses (${expensesInMonth.length})</h3>
-  ${(()=>{
-    const byCat = {};
-    expensesInMonth.forEach(e=>{ byCat[e.category] = (byCat[e.category]||0) + Number(e.amount||0); });
-    const cats = Object.keys(byCat);
-    if(!cats.length) return '';
-    return `<div class="card" style="margin-bottom:10px;">
-      ${cats.map(cat=>`<div class="row" style="padding:4px 0;"><span>${cat}</span><span style="font-weight:800;">${fmt(byCat[cat])}</span></div>`).join('')}
-      <div class="divider"></div>
-      <div class="row" style="font-weight:800;"><span>合计 Total</span><span>${fmt(curData.expense)}</span></div>
-    </div>`;
-  })()}
   ${expensesInMonth.length? expensesInMonth.map(e=>`
     <div class="card" style="padding:12px 16px;"><div class="row"><div><div style="font-weight:800;">${fmt(e.amount)}</div><div class="muted">${e.date} · ${e.category}${e.note?(' · '+e.note):''}</div></div></div></div>`).join('') : `<div class="muted" style="padding:6px 4px 16px;">这个月还没有开销记录 No expenses this month</div>`}
+
+  <div class="divider"></div>
+  ${(()=>{
+    const projectedList = [];
+    DB.invoices.forEach(inv=>{
+      const total = docTotal(inv);
+      const paid = (inv.payments||[]).reduce((s,p)=>s+Number(p.amount),0);
+      const remaining = total - paid;
+      if(remaining > 0.01 && inv.endDate){
+        const c = DB.clients.find(x=>x.id===inv.clientId);
+        projectedList.push({date: inv.endDate, amount: remaining, client: c?c.name:(inv.leadName||'—'), invNo: inv.no, invId: inv.id});
+      }
+    });
+    projectedList.sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+    const projByMonth = {};
+    projectedList.forEach(p=>{ const m=p.date.slice(0,7); projByMonth[m]=(projByMonth[m]||0)+p.amount; });
+    const totalProjected = projectedList.reduce((s,p)=>s+p.amount,0);
+    return `
+    <h3 style="margin:16px 2px 8px;">🔮 预计现金流 Projected Cash Flow</h3>
+    <div class="muted" style="font-size:12px; margin:-2px 2px 10px;">假设剩余尾款会在最后服务日收到 Assumes the remaining balance lands on each invoice's last service day</div>
+    ${projectedList.length? `
+    <div class="card" style="background:#F4ECDF; border:none; margin-bottom:10px; text-align:center; padding:14px;">
+      <div class="muted" style="font-size:12px;">待收总额 Total Expected</div>
+      <div style="font-size:22px; font-weight:800; color:var(--peach-dark);">${fmt(totalProjected)}</div>
+    </div>
+    <div class="card" style="margin-bottom:10px;">
+      ${Object.keys(projByMonth).sort().map(m=>`<div class="row" style="padding:4px 0;"><span>${m}</span><span style="font-weight:800;">${fmt(projByMonth[m])}</span></div>`).join('')}
+    </div>
+    ${projectedList.map(p=>`
+      <div class="card tap" style="padding:12px 16px;" onclick="state.moneyTab='invoices'; state.invId='${p.invId}'; render();">
+        <div class="row"><div><div style="font-weight:800;">${fmt(p.amount)}</div><div class="muted">预计 ${p.date} · ${p.client} · ${p.invNo}</div></div><span style="color:var(--ink-light);">›</span></div>
+      </div>`).join('')}
+    ` : `<div class="muted" style="padding:6px 4px 16px;">没有待收尾款 No pending balances</div>`}
+    `;
+  })()}
   `;
 }
 function renderAnalytics(){
@@ -1860,7 +1965,12 @@ function settingsHTML(){
   <div class="row" style="gap:10px;"><div style="flex:1;"><label class="flabel">CCTV 每日租金 (RM)</label><input type="number" id="f_s_cctvRate" value="${s.cctvDailyRate}"></div><div style="flex:1;"><label class="flabel">默认定金比例 (%)</label><input type="number" id="f_s_deposit" value="${s.depositPercent}"></div></div>
 
   <div class="divider"></div>
-  <div class="muted" style="margin-bottom:2px;">💡 每日服务细节选项现在放在「账目 → 服务类型」里管理，改一次两边都会同步。</div>
+  <h3>✅ 每日服务细节选项</h3>
+  <div class="muted" style="margin-bottom:8px;">新建账单/报价时，每一天可以从这些选项里挑选。这里改一次，账单表单里也会同步。</div>
+  ${(s.taskOptions||[]).map((t,idx)=>`<div class="row" style="margin-bottom:8px; gap:8px;"><div class="pill" style="flex:1; justify-content:flex-start; font-weight:700;">${t}</div><button class="miniremove" onclick="removeTaskOption(${idx})">✕</button></div>`).join('')}
+  <input id="f_task_new" placeholder="新增服务细节，例如：清理猫爬架">
+  <button class="btn btn-soft btn-block" style="margin-bottom:8px;" onclick="addTaskOption()">＋ 添加选项</button>
+  <button class="btn btn-outline btn-block" style="margin-bottom:14px;" onclick="resetTaskOptions()">↺ 恢复默认列表 Reset to default</button>
 
   <div class="divider"></div>
   <h3>📄 账单底部文字</h3>
