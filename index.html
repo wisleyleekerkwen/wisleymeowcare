@@ -1480,6 +1480,10 @@ function renderReports(){
     <div class="statcard"><div class="v" style="color:var(--sage-dark)">${fmt(curData.income)}</div><div class="l">${sel} 收入 Income</div></div>
     <div class="statcard"><div class="v" style="color:var(--peach-dark)">${fmt(curData.expense)}</div><div class="l">${sel} 开销 Expense</div></div>
   </div>
+  <div class="card" style="background:${(curData.income-curData.expense)>=0?'#E5F0E4':'#FBE4E1'}; border:none; margin-bottom:14px; text-align:center; padding:16px;">
+    <div class="muted" style="font-size:12px;">${sel} 净收入 Net Income</div>
+    <div style="font-size:26px; font-weight:800; color:${(curData.income-curData.expense)>=0?'var(--sage-dark)':'var(--danger)'};">${fmt(curData.income-curData.expense)}</div>
+  </div>
 
   <div class="card" style="margin-bottom:14px;">
     <h3>📈 近12个月走势 Trend</h3>
@@ -1869,21 +1873,26 @@ function runImport(){
   let data;
   try{ data = JSON.parse(val('f_import_json')); }
   catch(e){ toast('JSON格式不对，请检查 Invalid JSON'); return; }
-  let addedClients=0, addedInvoices=0, skippedClients=0, skippedInvoices=0;
+  let addedClients=0, addedInvoices=0, addedExpenses=0, skipped=0;
   (data.clients||[]).forEach(c=>{
     if(!c.id) c.id = uid();
-    if(DB.clients.find(x=>x.id===c.id)){ skippedClients++; return; }
+    if(DB.clients.find(x=>x.id===c.id)){ skipped++; return; }
     DB.clients.push(c); addedClients++;
   });
   (data.invoices||[]).forEach(inv=>{
     if(!inv.id) inv.id = uid();
-    if(DB.invoices.find(x=>x.id===inv.id)){ skippedInvoices++; return; }
+    if(DB.invoices.find(x=>x.id===inv.id)){ skipped++; return; }
     if(!inv.payments) inv.payments=[];
     DB.invoices.push(inv); addedInvoices++;
   });
-  save('clients'); save('invoices');
+  (data.expenses||[]).forEach(e=>{
+    if(!e.id) e.id = uid();
+    if(DB.expenses.find(x=>x.id===e.id)){ skipped++; return; }
+    DB.expenses.push(e); addedExpenses++;
+  });
+  save('clients'); save('invoices'); save('expenses');
   closeModal(); render();
-  toast(`已导入 ${addedClients} 位客户、${addedInvoices} 张账单${(skippedClients+skippedInvoices)? `（${skippedClients+skippedInvoices}条已存在，跳过）`:''} 🎉`);
+  toast(`已导入 ${addedClients} 位客户、${addedInvoices} 张账单、${addedExpenses} 条开销${skipped? `（${skipped}条已存在，跳过）`:''} 🎉`);
 }
 
 if(USE_FIREBASE && fbAuth){
