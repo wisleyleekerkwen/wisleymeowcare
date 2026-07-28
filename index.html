@@ -512,12 +512,13 @@ function niceDate(s){ const d=new Date(s+'T00:00:00'); return d.toLocaleDateStri
 /* ---------------- CLIENTS ---------------- */
 function renderClientList(){
   const q = (window.__clientQuery||'').toLowerCase();
-  const list = DB.clients.filter(c=>!q || c.name.toLowerCase().includes(q) || (c.phone||'').includes(q));
+  const list = DB.clients.filter(c=>!q || c.name.toLowerCase().includes(q) || (c.phone||'').includes(q))
+    .slice().sort((a,b)=> a.name.localeCompare(b.name, undefined, {sensitivity:'base'}));
   return `
   <h1>${tr('clientsTitle')}</h1>
   <div class="searchbar" style="margin-bottom:14px;">
     <span class="sic">🔍</span>
-    <input placeholder="${tr('searchClient')}" value="${window.__clientQuery||''}" oninput="window.__clientQuery=this.value; render();">
+    <input id="clientSearchInput" placeholder="${tr('searchClient')}" value="${window.__clientQuery||''}" oninput="window.__clientQuery=this.value; render();">
   </div>
   ${list.length? list.map(c=>{
       const pets=c.pets||[];
@@ -969,7 +970,7 @@ function renderDocList(type){
       return name.includes(q) || (d.no||'').toLowerCase().includes(q);
     });
   }
-  const searchBox = `<input placeholder="搜索客户姓名或单号 Search by client name or no." value="${window.__docQuery||''}" oninput="window.__docQuery=this.value; render();" style="margin-bottom:12px;">`;
+  const searchBox = `<input id="docSearchInput" placeholder="搜索客户姓名或单号 Search by client name or no." value="${window.__docQuery||''}" oninput="window.__docQuery=this.value; render();" style="margin-bottom:12px;">`;
   if(type==='invoice'){
     const outstanding = list.reduce((s,i)=>{ const t=docTotal(i); const p=(i.payments||[]).reduce((a,b)=>a+Number(b.amount),0); return s+Math.max(t-p,0); },0);
     return `
@@ -1402,7 +1403,7 @@ function openPaymentForm(invId){
   </div>
   <label class="flabel">金额</label><input type="number" id="f_pay_amt" value="${remaining.toFixed(2)}">
   <label class="flabel">日期</label><input type="date" id="f_pay_date" value="${todayStr()}">
-  <label class="flabel">付款方式</label><select id="f_pay_method"><option>现金</option><option>银行转账</option><option>电子钱包</option><option>其他</option></select>
+  <label class="flabel">付款方式</label><select id="f_pay_method"><option selected>银行转账</option><option>电子钱包</option><option>其他</option></select>
   <label class="flabel">备注（可选）</label><input id="f_pay_note" placeholder="参考编号等">
   <button class="btn btn-primary btn-block" id="btn_save_payment" onclick="savePayment('${invId}')">保存付款</button>`}
   `);
@@ -1624,6 +1625,7 @@ function renderReports(){
   </div>
   <div class="muted" style="font-size:12px; margin:-2px 2px 14px;">${basis==='service'? '按服务发生的日期统计收入 Revenue counted by the date the service happened' : '按实际收款的日期统计 Counted by the date payment was actually received'}</div>
 
+  ${basis==='service'? `
   <div class="statgrid" style="margin-bottom:14px;">
     <div class="statcard"><div class="v" style="color:var(--sage-dark)">${fmt(curData.income)}</div><div class="l">${sel} 收入 Income</div></div>
     <div class="statcard"><div class="v" style="color:var(--peach-dark)">${fmt(curData.expense)}</div><div class="l">${sel} 开销 Expense</div></div>
@@ -1632,7 +1634,6 @@ function renderReports(){
     <div class="muted" style="font-size:12px;">${sel} 净收入 Net Income</div>
     <div style="font-size:26px; font-weight:800; color:${(curData.income-curData.expense)>=0?'var(--sage-dark)':'var(--danger)'};">${fmt(curData.income-curData.expense)}</div>
   </div>
-
   ${(()=>{
     const byCat = {};
     expensesInMonth.forEach(e=>{ byCat[e.category] = (byCat[e.category]||0) + Number(e.amount||0); });
@@ -1645,7 +1646,10 @@ function renderReports(){
       <div class="row" style="font-weight:800;"><span>合计 Total</span><span>${fmt(curData.expense)}</span></div>
     </div>`;
   })()}
-
+  ` : `
+  <div class="statgrid" style="margin-bottom:14px;">
+    <div class="statcard"><div class="v" style="color:var(--sage-dark)">${fmt(curData.income)}</div><div class="l">${sel} 实收 Received</div></div>
+  </div>
   ${(()=>{
     const projectedList = [];
     DB.invoices.forEach(inv=>{
@@ -1677,6 +1681,7 @@ function renderReports(){
       </div>`).join('')}
     `;
   })()}
+  `}
 
   <div class="card" style="margin-bottom:14px;">
     <h3>📈 近12个月走势 Trend</h3>
@@ -1696,10 +1701,10 @@ function renderReports(){
 
   <h3 style="margin:16px 2px 8px;">${basis==='service'? '📆' : '💰'} ${sel} ${basis==='service'?'服务记录 Services':'收款记录 Payments'}</h3>
   ${incomeRows}
-
+  ${basis==='service'? `
   <h3 style="margin:16px 2px 8px;">🧾 ${sel} 开销记录 Expenses (${expensesInMonth.length})</h3>
   ${expensesInMonth.length? expensesInMonth.map(e=>`
-    <div class="card" style="padding:12px 16px;"><div class="row"><div><div style="font-weight:800;">${fmt(e.amount)}</div><div class="muted">${e.date} · ${e.category}${e.note?(' · '+e.note):''}</div></div></div></div>`).join('') : `<div class="muted" style="padding:6px 4px 16px;">这个月还没有开销记录 No expenses this month</div>`}
+    <div class="card" style="padding:12px 16px;"><div class="row"><div><div style="font-weight:800;">${fmt(e.amount)}</div><div class="muted">${e.date} · ${e.category}${e.note?(' · '+e.note):''}</div></div></div></div>`).join('') : `<div class="muted" style="padding:6px 4px 16px;">这个月还没有开销记录 No expenses this month</div>`}` : ''}
   `;
 }
 function renderAnalytics(){
