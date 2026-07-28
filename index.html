@@ -13,6 +13,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 <style>
   :root{
     --bg:#FBF6EE;
@@ -91,6 +97,11 @@
   #modalCard{position:relative; width:100%; max-width:460px; max-height:88vh; overflow-y:auto; overscroll-behavior:contain; background:var(--bg); border-radius:26px 26px 0 0; padding:0 18px 26px; animation:slideup .18s ease-out;}
   #modalCloseFab{display:none; position:absolute; bottom:24px; right:24px; z-index:110; width:48px; height:48px; border-radius:50%; border:none; background:rgba(50,40,25,0.75); color:#fff; font-size:20px; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,0.3);}
   #modalRoot.open #modalCloseFab{display:flex;}
+  #loadingScreen{position:fixed; inset:0; z-index:200; display:none; align-items:center; justify-content:center; background:var(--bg);}
+  #loginScreen{position:fixed; inset:0; z-index:200; display:none; align-items:center; justify-content:center; background:var(--bg); padding:20px;}
+  .loginbox{width:100%; max-width:360px; background:var(--card); border-radius:24px; padding:28px 24px; box-shadow:0 10px 30px rgba(0,0,0,0.08); text-align:center;}
+  .loginbox input{text-align:left;}
+  .loginbox .flabel{text-align:left;}
   @keyframes slideup{from{transform:translateY(30px); opacity:0;} to{transform:translateY(0);opacity:1;}}
   .modalhead{display:flex; align-items:center; justify-content:space-between; margin:0 -18px 14px; padding:18px 18px 10px; position:-webkit-sticky; position:sticky; top:0; background:var(--bg); z-index:5;}
   .closex{width:32px;height:32px;border-radius:12px;background:var(--card-alt); border:none; display:flex;align-items:center;justify-content:center; cursor:pointer; color:var(--ink-light); font-size:16px;}
@@ -134,7 +145,18 @@
 </style>
 </head>
 <body>
-<div id="shell">
+<div id="loginScreen" style="display:none;">
+  <div class="loginbox">
+    <img id="loginLogo" src="" style="width:64px;height:64px;border-radius:18px;object-fit:cover;margin-bottom:14px;">
+    <h2 style="margin:0 0 4px;">Wisley Meowcare</h2>
+    <div class="muted" style="margin-bottom:20px;">登录后数据会在你的手机和电脑之间同步<br>Sign in to sync your data across devices</div>
+    <label class="flabel">邮箱 Email</label><input id="f_login_email" type="email" placeholder="you@example.com">
+    <label class="flabel">密码 Password</label><input id="f_login_pass" type="password" placeholder="••••••••">
+    <div id="loginError" class="muted" style="color:#D97066; margin:6px 0 0; min-height:16px; font-size:12.5px;"></div>
+    <button class="btn btn-primary btn-block" style="margin-top:14px;" onclick="doLogin()">登录 Sign in</button>
+  </div>
+</div>
+<div id="shell" style="display:none;">
   <div id="topbar">
     <div class="brand"><img class="pawmark" id="logoImg" src="" style="width:34px;height:34px;border-radius:10px;object-fit:cover;"><span id="brandName">Wisley Meowcare</span></div>
     <button class="headerbtn" id="langBtn" onclick="toggleLang()" style="font-weight:800; font-size:13px;">EN</button>
@@ -151,6 +173,7 @@
 </div>
 <div id="modalRoot"><div id="modalOverlay" onclick="closeModal()"></div><div id="modalCard"></div><button id="modalCloseFab" onclick="closeModal()">✕</button></div>
 <div class="toast" id="toast"></div>
+<div id="loadingScreen" style="display:flex;"><span class="emoji" style="font-size:36px;">🐾</span></div>
 
 <script>
 /* ---------------- constants ---------------- */
@@ -182,13 +205,40 @@ let DB = { clients:[], services:[], quotes:[], invoices:[], appointments:[], exp
   } };
 
 const HAS_CLAUDE_STORAGE = (typeof window.storage !== 'undefined' && window.storage && typeof window.storage.get === 'function');
+const firebaseConfig = {
+  apiKey: "AIzaSyCtKg5tT0nJr1bslNcZ9hLDG_soU56vznI",
+  authDomain: "wisleymeowcare.firebaseapp.com",
+  projectId: "wisleymeowcare",
+  storageBucket: "wisleymeowcare.firebasestorage.app",
+  messagingSenderId: "981991956836",
+  appId: "1:981991956836:web:b0d9e2bc55ab5628f71a71",
+  measurementId: "G-WX7RHYT6RN"
+};
+const USE_FIREBASE = !HAS_CLAUDE_STORAGE;
+let fbApp=null, fbAuth=null, fbDB=null, fbUser=null;
+if(USE_FIREBASE){
+  try{
+    fbApp = firebase.initializeApp(firebaseConfig);
+    fbAuth = firebase.auth();
+    fbDB = firebase.firestore();
+  }catch(e){ console.error('Firebase init failed', e); }
+}
 async function storageGet(key){
+  if(fbUser){
+    const doc = await fbDB.collection('users').doc(fbUser.uid).collection('data').doc(key).get();
+    if(doc.exists) return {value: doc.data().value};
+    throw new Error('not found');
+  }
   if(HAS_CLAUDE_STORAGE) return window.storage.get(key, false);
   const raw = localStorage.getItem('wis_'+key);
   if(raw===null) throw new Error('not found');
   return {value: raw};
 }
 async function storageSet(key, value){
+  if(fbUser){
+    await fbDB.collection('users').doc(fbUser.uid).collection('data').doc(key).set({value});
+    return true;
+  }
   if(HAS_CLAUDE_STORAGE) return window.storage.set(key, value, false);
   localStorage.setItem('wis_'+key, value);
   return true;
@@ -1524,6 +1574,13 @@ function settingsHTML(){
   return `
   <div class="modalhead"><h2>设置 Settings</h2><button class="closex" onclick="closeModal()">✕</button></div>
 
+  ${USE_FIREBASE && fbUser? `
+  <div class="card" style="background:#E9F1EA; border:none; margin-bottom:14px;">
+    <h3>☁️ 云同步账号 Cloud Account</h3>
+    <div class="muted" style="font-size:12.5px; margin-bottom:10px;">已登录 Logged in as：${fbUser.email}</div>
+    <button class="btn btn-soft btn-block" onclick="doLogout()">退出登录 Log Out</button>
+  </div>` : ''}
+
   <div class="card" style="background:#F4ECDF; border:none; margin-bottom:14px;">
     <h3>📲 加到手机主屏幕 Add to Home Screen</h3>
     <div class="muted" style="font-size:12.5px; line-height:1.7;">
@@ -1594,13 +1651,45 @@ function saveSettings(){
 }
 
 /* ---------------- init ---------------- */
-loadAll().then(()=>{
-  document.getElementById('brandName').textContent = DB.settings.businessName;
-  document.getElementById('logoImg').src = LOGO_B64;
-  state.lang = DB.settings.lang || 'zh';
-  const langBtn = document.getElementById('langBtn'); if(langBtn) langBtn.textContent = state.lang==='zh'?'EN':'中';
-  render();
-});
+function startApp(){
+  loadAll().then(()=>{
+    document.getElementById('brandName').textContent = DB.settings.businessName;
+    document.getElementById('logoImg').src = LOGO_B64;
+    const ll = document.getElementById('loginLogo'); if(ll) ll.src = LOGO_B64;
+    state.lang = DB.settings.lang || 'zh';
+    const langBtn = document.getElementById('langBtn'); if(langBtn) langBtn.textContent = state.lang==='zh'?'EN':'中';
+    document.getElementById('loadingScreen').style.display='none';
+    document.getElementById('loginScreen').style.display='none';
+    document.getElementById('shell').style.display='';
+    render();
+  });
+}
+function showLogin(){
+  const ll = document.getElementById('loginLogo'); if(ll) ll.src = LOGO_B64;
+  document.getElementById('loadingScreen').style.display='none';
+  document.getElementById('shell').style.display='none';
+  document.getElementById('loginScreen').style.display='flex';
+}
+function doLogin(){
+  const email = val('f_login_email').trim();
+  const pass = val('f_login_pass');
+  const errEl = document.getElementById('loginError');
+  errEl.textContent='';
+  if(!email || !pass){ errEl.textContent='请输入邮箱和密码 Enter email and password'; return; }
+  fbAuth.signInWithEmailAndPassword(email, pass).catch(err=>{
+    errEl.textContent = '登录失败 Login failed: '+(err&&err.message? err.message : '');
+  });
+}
+function doLogout(){ if(fbAuth){ closeModal(); fbAuth.signOut(); } }
+
+if(USE_FIREBASE && fbAuth){
+  fbAuth.onAuthStateChanged(user=>{
+    fbUser = user;
+    if(user) startApp(); else showLogin();
+  });
+} else {
+  startApp();
+}
 </script>
 </body>
 </html>
