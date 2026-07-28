@@ -393,6 +393,11 @@ function onFab(){
 }
 
 function render(){
+  const activeEl = document.activeElement;
+  const activeId = (activeEl && activeEl.id) ? activeEl.id : null;
+  const activeSelStart = (activeEl && typeof activeEl.selectionStart === 'number') ? activeEl.selectionStart : null;
+  const activeSelEnd = (activeEl && typeof activeEl.selectionEnd === 'number') ? activeEl.selectionEnd : null;
+
   document.querySelectorAll('.tabbtn').forEach(b=>b.classList.toggle('active', b.dataset.tab===state.tab));
   const navlbl = {today:'navlbl_today', clients:'navlbl_clients', schedule:'navlbl_schedule', money:'navlbl_money'};
   Object.keys(navlbl).forEach(k=>{ const el=document.getElementById(navlbl[k]); if(el) el.textContent = tr(k); });
@@ -403,6 +408,14 @@ function render(){
   else if(state.tab==='clients') el.innerHTML = state.clientId ? renderClientDetail(state.clientId) : renderClientList();
   else if(state.tab==='schedule') el.innerHTML = renderSchedule();
   else if(state.tab==='money') el.innerHTML = renderMoney();
+
+  if(activeId){
+    const restored = document.getElementById(activeId);
+    if(restored && (restored.tagName==='INPUT' || restored.tagName==='TEXTAREA')){
+      restored.focus();
+      if(activeSelStart!==null){ try{ restored.setSelectionRange(activeSelStart, activeSelEnd); }catch(e){} }
+    }
+  }
 }
 
 /* ---------------- TODAY ---------------- */
@@ -466,6 +479,10 @@ function renderToday(){
     <div class="statcard"><div class="v">${upcoming}</div><div class="l">${tr('upcoming')}</div></div>
     <div class="statcard"><div class="v" style="color:var(--sage-dark)">${fmt(monthIncome)}</div><div class="l">${tr('monthIncome')}</div></div>
     <div class="statcard"><div class="v" style="color:var(--peach-dark)">${fmt(outstanding)}</div><div class="l">${tr('outstanding')}</div></div>
+  </div>
+  <div class="card" style="background:#FDF0DD; border:none; margin-bottom:16px; text-align:center; padding:14px;">
+    <div class="muted" style="font-size:12px;">🎉 本月开心基金 Happy Fund (10% of ${tr('monthIncome')})</div>
+    <div style="font-size:22px; font-weight:800; color:var(--peach-dark);">${fmt(monthIncome*0.1)}</div>
   </div>
   ${giftEligible.length? `
   <div class="card" style="background:#FCEBDD; border:none;">
@@ -1499,7 +1516,7 @@ function openExpenseForm(){
   const clientOpts = DB.clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
   openModal(`
   <div class="modalhead"><h2>记录开销</h2><button class="closex" onclick="closeModal()">✕</button></div>
-  <label class="flabel">类别</label><select id="f_exp_cat"><option>停车</option><option>过路费</option><option>平台费</option><option>其他</option></select>
+  <label class="flabel">类别</label><select id="f_exp_cat"><option>停车</option><option>过路费</option><option>平台费</option><option>里程费</option><option>其他</option></select>
   <label class="flabel">金额</label><input type="number" id="f_exp_amt" placeholder="0.00">
   <label class="flabel">日期</label><input type="date" id="f_exp_date" value="${todayStr()}">
   <label class="flabel">关联客户（可选）</label><select id="f_exp_client"><option value="">不关联</option>${clientOpts}</select>
@@ -1629,6 +1646,38 @@ function renderReports(){
     </div>`;
   })()}
 
+  ${(()=>{
+    const projectedList = [];
+    DB.invoices.forEach(inv=>{
+      const total = docTotal(inv);
+      const paid = (inv.payments||[]).reduce((s,p)=>s+Number(p.amount),0);
+      const remaining = total - paid;
+      if(remaining > 0.01 && inv.endDate){
+        const c = DB.clients.find(x=>x.id===inv.clientId);
+        projectedList.push({date: inv.endDate, amount: remaining, client: c?c.name:(inv.leadName||'—'), invNo: inv.no, invId: inv.id});
+      }
+    });
+    projectedList.sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+    const projByMonth = {};
+    projectedList.forEach(p=>{ const m=p.date.slice(0,7); projByMonth[m]=(projByMonth[m]||0)+p.amount; });
+    const totalProjected = projectedList.reduce((s,p)=>s+p.amount,0);
+    return `
+    <div class="card" style="margin-bottom:14px;">
+      <h3>🔮 预计现金流 Projected Cash Flow</h3>
+      <div class="muted" style="font-size:12px; margin-bottom:10px;">假设剩余尾款会在最后服务日收到 Assumes the remaining balance lands on each invoice's last service day</div>
+      ${projectedList.length? `
+      <div class="row" style="justify-content:space-between; padding:6px 0; font-weight:800; color:var(--peach-dark);"><span>待收总额 Total Expected</span><span>${fmt(totalProjected)}</span></div>
+      <div class="divider"></div>
+      ${Object.keys(projByMonth).sort().map(m=>`<div class="row" style="padding:4px 0;"><span>${m}</span><span style="font-weight:800;">${fmt(projByMonth[m])}</span></div>`).join('')}
+      ` : `<div class="muted" style="padding:6px 4px;">没有待收尾款 No pending balances</div>`}
+    </div>
+    ${projectedList.map(p=>`
+      <div class="card tap" style="padding:12px 16px;" onclick="state.moneyTab='invoices'; state.invId='${p.invId}'; render();">
+        <div class="row"><div><div style="font-weight:800;">${fmt(p.amount)}</div><div class="muted">预计 ${p.date} · ${p.client} · ${p.invNo}</div></div><span style="color:var(--ink-light);">›</span></div>
+      </div>`).join('')}
+    `;
+  })()}
+
   <div class="card" style="margin-bottom:14px;">
     <h3>📈 近12个月走势 Trend</h3>
     <div class="row" style="gap:14px; margin-bottom:10px; font-size:11.5px;">
@@ -1651,41 +1700,6 @@ function renderReports(){
   <h3 style="margin:16px 2px 8px;">🧾 ${sel} 开销记录 Expenses (${expensesInMonth.length})</h3>
   ${expensesInMonth.length? expensesInMonth.map(e=>`
     <div class="card" style="padding:12px 16px;"><div class="row"><div><div style="font-weight:800;">${fmt(e.amount)}</div><div class="muted">${e.date} · ${e.category}${e.note?(' · '+e.note):''}</div></div></div></div>`).join('') : `<div class="muted" style="padding:6px 4px 16px;">这个月还没有开销记录 No expenses this month</div>`}
-
-  <div class="divider"></div>
-  ${(()=>{
-    const projectedList = [];
-    DB.invoices.forEach(inv=>{
-      const total = docTotal(inv);
-      const paid = (inv.payments||[]).reduce((s,p)=>s+Number(p.amount),0);
-      const remaining = total - paid;
-      if(remaining > 0.01 && inv.endDate){
-        const c = DB.clients.find(x=>x.id===inv.clientId);
-        projectedList.push({date: inv.endDate, amount: remaining, client: c?c.name:(inv.leadName||'—'), invNo: inv.no, invId: inv.id});
-      }
-    });
-    projectedList.sort((a,b)=> (a.date||'').localeCompare(b.date||''));
-    const projByMonth = {};
-    projectedList.forEach(p=>{ const m=p.date.slice(0,7); projByMonth[m]=(projByMonth[m]||0)+p.amount; });
-    const totalProjected = projectedList.reduce((s,p)=>s+p.amount,0);
-    return `
-    <h3 style="margin:16px 2px 8px;">🔮 预计现金流 Projected Cash Flow</h3>
-    <div class="muted" style="font-size:12px; margin:-2px 2px 10px;">假设剩余尾款会在最后服务日收到 Assumes the remaining balance lands on each invoice's last service day</div>
-    ${projectedList.length? `
-    <div class="card" style="background:#F4ECDF; border:none; margin-bottom:10px; text-align:center; padding:14px;">
-      <div class="muted" style="font-size:12px;">待收总额 Total Expected</div>
-      <div style="font-size:22px; font-weight:800; color:var(--peach-dark);">${fmt(totalProjected)}</div>
-    </div>
-    <div class="card" style="margin-bottom:10px;">
-      ${Object.keys(projByMonth).sort().map(m=>`<div class="row" style="padding:4px 0;"><span>${m}</span><span style="font-weight:800;">${fmt(projByMonth[m])}</span></div>`).join('')}
-    </div>
-    ${projectedList.map(p=>`
-      <div class="card tap" style="padding:12px 16px;" onclick="state.moneyTab='invoices'; state.invId='${p.invId}'; render();">
-        <div class="row"><div><div style="font-weight:800;">${fmt(p.amount)}</div><div class="muted">预计 ${p.date} · ${p.client} · ${p.invNo}</div></div><span style="color:var(--ink-light);">›</span></div>
-      </div>`).join('')}
-    ` : `<div class="muted" style="padding:6px 4px 16px;">没有待收尾款 No pending balances</div>`}
-    `;
-  })()}
   `;
 }
 function renderAnalytics(){
