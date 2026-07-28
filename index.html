@@ -89,6 +89,9 @@
   #modalRoot.open{display:flex; align-items:flex-end; justify-content:center;}
   #modalOverlay{position:absolute; inset:0; background:rgba(50,40,25,0.38);}
   #modalCard{position:relative; width:100%; max-width:460px; max-height:88vh; overflow-y:auto; overscroll-behavior:contain; background:var(--bg); border-radius:26px 26px 0 0; padding:0 18px 26px; animation:slideup .18s ease-out;}
+  #modalCloseFab{display:none; position:fixed; top:20px; right:calc(50% - 230px + 14px); z-index:110; width:36px; height:36px; border-radius:50%; border:none; background:rgba(50,40,25,0.55); color:#fff; font-size:16px; align-items:center; justify-content:center; cursor:pointer;}
+  #modalRoot.open #modalCloseFab{display:flex;}
+  @media (max-width:520px){ #modalCloseFab{ right:14px; } }
   @keyframes slideup{from{transform:translateY(30px); opacity:0;} to{transform:translateY(0);opacity:1;}}
   .modalhead{display:flex; align-items:center; justify-content:space-between; margin:0 -18px 14px; padding:18px 18px 10px; position:sticky; top:0; background:var(--bg); z-index:5;}
   .closex{width:32px;height:32px;border-radius:12px;background:var(--card-alt); border:none; display:flex;align-items:center;justify-content:center; cursor:pointer; color:var(--ink-light); font-size:16px;}
@@ -147,7 +150,7 @@
     <button class="tabbtn" data-tab="money" onclick="setTab('money')"><span class="ic">💰</span><span class="label" id="navlbl_money">账目</span></button>
   </div></div>
 </div>
-<div id="modalRoot"><div id="modalOverlay" onclick="closeModal()"></div><div id="modalCard"></div></div>
+<div id="modalRoot"><div id="modalOverlay" onclick="closeModal()"></div><div id="modalCard"></div><button id="modalCloseFab" onclick="closeModal()">✕</button></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -299,8 +302,21 @@ function toggleLang(){
 }
 
 function setTab(t){ state.tab=t; state.clientId=null; state.invId=null; state.quoteId=null; render(); }
-function closeModal(){ document.getElementById('modalRoot').classList.remove('open'); document.getElementById('modalCard').innerHTML=''; }
-function openModal(html){ document.getElementById('modalCard').innerHTML=html; document.getElementById('modalRoot').classList.add('open'); }
+let __scrollLockY = 0;
+function closeModal(){
+  document.getElementById('modalRoot').classList.remove('open');
+  document.getElementById('modalCard').innerHTML='';
+  document.body.style.position=''; document.body.style.top=''; document.body.style.width='';
+  window.scrollTo(0, __scrollLockY);
+}
+function openModal(html){
+  __scrollLockY = window.scrollY || window.pageYOffset || 0;
+  document.body.style.position='fixed';
+  document.body.style.top=(-__scrollLockY)+'px';
+  document.body.style.width='100%';
+  document.getElementById('modalCard').innerHTML=html;
+  document.getElementById('modalRoot').classList.add('open');
+}
 function confirmAction(message, callback){
   window.__confirmCb = callback;
   openModal(`
