@@ -89,11 +89,9 @@
   #modalRoot.open{display:flex; align-items:flex-end; justify-content:center;}
   #modalOverlay{position:absolute; inset:0; background:rgba(50,40,25,0.38);}
   #modalCard{position:relative; width:100%; max-width:460px; max-height:88vh; overflow-y:auto; overscroll-behavior:contain; background:var(--bg); border-radius:26px 26px 0 0; padding:0 18px 26px; animation:slideup .18s ease-out;}
-  #modalCloseFab{display:none; position:fixed; top:20px; right:calc(50% - 230px + 14px); z-index:110; width:36px; height:36px; border-radius:50%; border:none; background:rgba(50,40,25,0.55); color:#fff; font-size:16px; align-items:center; justify-content:center; cursor:pointer;}
-  #modalRoot.open #modalCloseFab{display:flex;}
-  @media (max-width:520px){ #modalCloseFab{ right:14px; } }
+  #modalCloseFab{display:none;}
   @keyframes slideup{from{transform:translateY(30px); opacity:0;} to{transform:translateY(0);opacity:1;}}
-  .modalhead{display:flex; align-items:center; justify-content:space-between; margin:0 -18px 14px; padding:18px 18px 10px; position:sticky; top:0; background:var(--bg); z-index:5;}
+  .modalhead{display:flex; align-items:center; justify-content:space-between; margin:0 -18px 14px; padding:18px 18px 10px; position:-webkit-sticky; position:sticky; top:0; background:var(--bg); z-index:5;}
   .closex{width:32px;height:32px;border-radius:12px;background:var(--card-alt); border:none; display:flex;align-items:center;justify-content:center; cursor:pointer; color:var(--ink-light); font-size:16px;}
   table.simple{width:100%; border-collapse:collapse; font-size:13.5px;}
   table.simple th{text-align:left; color:var(--ink-light); font-size:11.5px; padding:4px 6px; font-weight:800;}
@@ -150,7 +148,7 @@
     <button class="tabbtn" data-tab="money" onclick="setTab('money')"><span class="ic">💰</span><span class="label" id="navlbl_money">账目</span></button>
   </div></div>
 </div>
-<div id="modalRoot"><div id="modalOverlay" onclick="closeModal()"></div><div id="modalCard"></div><button id="modalCloseFab" onclick="closeModal()">✕</button></div>
+<div id="modalRoot"><div id="modalOverlay" onclick="closeModal()"></div><div id="modalCard"></div></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -302,20 +300,18 @@ function toggleLang(){
 }
 
 function setTab(t){ state.tab=t; state.clientId=null; state.invId=null; state.quoteId=null; render(); }
-let __scrollLockY = 0;
+function __blockBgTouch(e){
+  if(!e.target.closest('#modalCard')) e.preventDefault();
+}
 function closeModal(){
   document.getElementById('modalRoot').classList.remove('open');
   document.getElementById('modalCard').innerHTML='';
-  document.body.style.position=''; document.body.style.top=''; document.body.style.width='';
-  window.scrollTo(0, __scrollLockY);
+  document.removeEventListener('touchmove', __blockBgTouch);
 }
 function openModal(html){
-  __scrollLockY = window.scrollY || window.pageYOffset || 0;
-  document.body.style.position='fixed';
-  document.body.style.top=(-__scrollLockY)+'px';
-  document.body.style.width='100%';
   document.getElementById('modalCard').innerHTML=html;
   document.getElementById('modalRoot').classList.add('open');
+  document.addEventListener('touchmove', __blockBgTouch, {passive:false});
 }
 function confirmAction(message, callback){
   window.__confirmCb = callback;
@@ -1452,21 +1448,38 @@ function genPDF(type, id, mode){
     if(imgH <= pageH){
       pdf.addImage(imgData, 'JPEG', 0, 0, pageW, imgH);
     } else {
-      // Compute safe page-break points that avoid slicing through a table row.
+      // Compute safe page-break points (in mm) that avoid slicing through a table row.
       const mmPerPx = pageW / wrapWidthPx;
       const rowBoundariesMM = rowBoundariesPx.map(px=>px*mmPerPx).filter(v=> v>0 && v<imgH);
       const tolerance = pageH*0.3;
-      const breaks = [];
+      const breaksMM = [];
       let naive = pageH, prevBreak = 0;
       while(naive < imgH){
         let best = naive;
         rowBoundariesMM.forEach(rb=>{ if(rb>prevBreak && rb<=naive && (naive-rb)<=tolerance) best = rb; });
-        breaks.push(best);
+        breaksMM.push(best);
         prevBreak = best;
         naive = best + pageH;
       }
-      pdf.addImage(imgData, 'JPEG', 0, 0, pageW, imgH);
-      breaks.forEach(b=>{ pdf.addPage(); pdf.addImage(imgData, 'JPEG', 0, -b, pageW, imgH); });
+      breaksMM.push(imgH);
+      // Crop the canvas into exact, non-overlapping slices for each page (avoids the
+      // duplication that happens if you rely on jsPDF's page boundary to clip content,
+      // since our safe breaks are often earlier than a full page height).
+      const pxPerMM = canvas.width / pageW;
+      let prevPx = 0;
+      breaksMM.forEach((bMM, i)=>{
+        const bPx = Math.round(bMM * pxPerMM);
+        const sliceHeightPx = bPx - prevPx;
+        if(sliceHeightPx <= 0) return;
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = canvas.width; pageCanvas.height = sliceHeightPx;
+        pageCanvas.getContext('2d').drawImage(canvas, 0, prevPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+        const sliceData = pageCanvas.toDataURL('image/jpeg', 0.92);
+        const sliceHeightMM = sliceHeightPx / pxPerMM;
+        if(i>0) pdf.addPage();
+        pdf.addImage(sliceData, 'JPEG', 0, 0, pageW, sliceHeightMM);
+        prevPx = bPx;
+      });
     }
     if(mode==='inline'){
       openModal(`
