@@ -1576,6 +1576,12 @@ function settingsHTML(){
   return `
   <div class="modalhead"><h2>设置 Settings</h2><button class="closex" onclick="closeModal()">✕</button></div>
 
+  <div class="card" style="background:#FCEBDD; border:none; margin-bottom:14px;">
+    <h3>📥 导入历史数据 Import Data</h3>
+    <div class="muted" style="font-size:12.5px; margin-bottom:10px;">从Excel等旧记录整理好的数据，粘贴JSON一次性导入客户和账单，不会删除已有资料。<br>Paste prepared JSON to bulk-import clients/invoices. Won't delete existing data.</div>
+    <button class="btn btn-soft btn-block" onclick="openImportUI()">导入数据 Import</button>
+  </div>
+
   ${USE_FIREBASE && fbUser? `
   <div class="card" style="background:#E9F1EA; border:none; margin-bottom:14px;">
     <h3>☁️ 云同步账号 Cloud Account</h3>
@@ -1683,6 +1689,34 @@ function doLogin(){
   });
 }
 function doLogout(){ if(fbAuth){ closeModal(); fbAuth.signOut(); } }
+function openImportUI(){
+  openModal(`
+  <div class="modalhead"><h2>导入数据 Import Data</h2><button class="closex" onclick="closeModal()">✕</button></div>
+  <div class="muted" style="margin-bottom:10px; font-size:12.5px; line-height:1.6;">把整理好的JSON数据粘贴到下面，点导入。会按ID去重合并，不会重复添加、也不会删除你现有的资料。<br>Paste the prepared JSON below and tap Import. Merges by ID — won't duplicate or delete existing data.</div>
+  <textarea id="f_import_json" style="min-height:180px; font-family:monospace; font-size:11.5px;" placeholder='{"clients":[...],"invoices":[...]}'></textarea>
+  <button class="btn btn-primary btn-block" style="margin-top:10px;" onclick="runImport()">导入 Import</button>
+  `);
+}
+function runImport(){
+  let data;
+  try{ data = JSON.parse(val('f_import_json')); }
+  catch(e){ toast('JSON格式不对，请检查 Invalid JSON'); return; }
+  let addedClients=0, addedInvoices=0, skippedClients=0, skippedInvoices=0;
+  (data.clients||[]).forEach(c=>{
+    if(!c.id) c.id = uid();
+    if(DB.clients.find(x=>x.id===c.id)){ skippedClients++; return; }
+    DB.clients.push(c); addedClients++;
+  });
+  (data.invoices||[]).forEach(inv=>{
+    if(!inv.id) inv.id = uid();
+    if(DB.invoices.find(x=>x.id===inv.id)){ skippedInvoices++; return; }
+    if(!inv.payments) inv.payments=[];
+    DB.invoices.push(inv); addedInvoices++;
+  });
+  save('clients'); save('invoices');
+  closeModal(); render();
+  toast(`已导入 ${addedClients} 位客户、${addedInvoices} 张账单${(skippedClients+skippedInvoices)? `（${skippedClients+skippedInvoices}条已存在，跳过）`:''} 🎉`);
+}
 
 if(USE_FIREBASE && fbAuth){
   fbAuth.onAuthStateChanged(user=>{
