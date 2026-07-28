@@ -13,9 +13,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
@@ -449,7 +447,9 @@ function renderToday(){
   const todays = DB.appointments.filter(a=>a.date===t).sort((a,b)=>(a.start||'').localeCompare(b.start||''));
   const upcoming = DB.appointments.filter(a=>a.date>t).length;
   const monthPrefix = t.slice(0,7);
-  const monthIncome = (monthlyFinancials('service')[monthPrefix] || {income:0}).income;
+  const allFinancials = monthlyFinancials('service');
+  const monthIncome = (allFinancials[monthPrefix] || {income:0}).income;
+  const totalIncome = Object.values(allFinancials).reduce((s,m)=>s+m.income,0);
   let outstanding=0;
   DB.invoices.forEach(inv=>{ const paid=(inv.payments||[]).reduce((s,p)=>s+Number(p.amount),0); const tot=docTotal(inv); if(tot-paid>0.001) outstanding += (tot-paid); });
   const giftEligible = DB.clients.map(c=>({c, st:clientStats(c)})).filter(x=>x.st.serviceCount>=10);
@@ -457,6 +457,10 @@ function renderToday(){
   return `
   <h1>${tr('hello')}</h1>
   <div class="muted" style="margin-bottom:16px;">${niceDate(t)} · 一起把猫咪们照顾好</div>
+  <div class="card" style="background:#E9F1EA; border:none; margin-bottom:14px; text-align:center; padding:16px;">
+    <div class="muted" style="font-size:12px;">累计总收入 Total Income (all time)</div>
+    <div style="font-size:28px; font-weight:800; color:var(--sage-dark);">${fmt(totalIncome)}</div>
+  </div>
   <div class="statgrid" style="margin-bottom:16px;">
     <div class="statcard"><div class="v">${todays.length}</div><div class="l">${tr('todayCount')}</div></div>
     <div class="statcard"><div class="v">${upcoming}</div><div class="l">${tr('upcoming')}</div></div>
@@ -1027,6 +1031,8 @@ function openDocForm(type, id){
   <button class="btn btn-soft btn-block" style="margin-bottom:14px;" onclick="applySuggestedPriceToAll()">🧮 按${type==='quote'?'路线距离':'客户里程'}计算建议单价，套用到全部天数</button>
 
   <label class="flabel">每日行程</label>
+  <div class="muted tap" style="text-align:right; margin:-6px 2px 6px; color:var(--sage-dark); font-weight:800; font-size:12px; cursor:pointer;" onclick="toggleTaskOptionsManage()">✏️ 管理服务细节清单 Manage list</div>
+  <div id="taskOptionsManageWrap" style="display:none;"></div>
   <div id="visitsWrap"></div>
   <button class="btn btn-outline btn-block" style="margin-bottom:14px;" onclick="addVisitRow()">＋ 手动添加一天</button>
 
@@ -1084,6 +1090,36 @@ function toggleVisitTask(visitIdx, optIdx, checked){
   if(!v.tasks) v.tasks=[];
   if(checked){ if(!v.tasks.includes(opt)) v.tasks.push(opt); }
   else { v.tasks = v.tasks.filter(t=>t!==opt); }
+}
+function toggleTaskOptionsManage(){
+  const wrap = document.getElementById('taskOptionsManageWrap');
+  const showing = wrap.style.display !== 'none';
+  wrap.style.display = showing ? 'none' : 'block';
+  if(!showing) renderTaskOptionsManage();
+}
+function renderTaskOptionsManage(){
+  const wrap = document.getElementById('taskOptionsManageWrap'); if(!wrap) return;
+  wrap.innerHTML = `
+    <div class="card" style="background:var(--card-alt); margin-bottom:12px;">
+      ${(DB.settings.taskOptions||[]).map((t,idx)=>`<div class="row" style="margin-bottom:8px; gap:8px;"><div class="pill" style="flex:1; justify-content:flex-start; font-weight:700;">${t}</div><button class="miniremove" onclick="removeTaskOptionInline(${idx})">✕</button></div>`).join('')}
+      <input id="f_task_inline_new" placeholder="新增服务细节，例如：清理猫爬架">
+      <button class="btn btn-soft btn-block" style="margin-bottom:0;" onclick="addTaskOptionInline()">＋ 添加选项</button>
+    </div>`;
+}
+function addTaskOptionInline(){
+  const t = val('f_task_inline_new').trim();
+  if(!t){ toast('请输入内容'); return; }
+  if(!DB.settings.taskOptions) DB.settings.taskOptions=[];
+  DB.settings.taskOptions.push(t);
+  save('settings');
+  renderTaskOptionsManage();
+  renderVisitRows();
+}
+function removeTaskOptionInline(idx){
+  DB.settings.taskOptions.splice(idx,1);
+  save('settings');
+  renderTaskOptionsManage();
+  renderVisitRows();
 }
 function renderVisitRows(){
   const wrap = document.getElementById('visitsWrap'); if(!wrap) return;
@@ -1414,6 +1450,33 @@ function saveExpense(){
 /* 服务细节选项现在只在 ⚙️设置 里管理，避免出现两份不同步的清单 */
 
 /* ---- analytics ---- */
+function openQuickEditVisit(invId, visitId){
+  const inv = DB.invoices.find(x=>x.id===invId); if(!inv) return;
+  const v = (inv.visits||[]).find(x=>x.id===visitId); if(!v) return;
+  const c = DB.clients.find(x=>x.id===inv.clientId);
+  openModal(`
+  <div class="modalhead"><h2>编辑服务记录 Edit Service</h2><button class="closex" onclick="closeModal()">✕</button></div>
+  <div class="muted" style="margin-bottom:10px;">${c?c.name:(inv.leadName||'—')} · ${inv.no}</div>
+  <label class="flabel">日期 Date</label><input type="date" id="f_qev_date" value="${v.date}">
+  <label class="flabel">时间段 Time Slot</label><input id="f_qev_slot" value="${v.timeSlot||''}">
+  <label class="flabel">金额 Amount (已扣折扣的最终金额 final amount after any discount)</label><input type="number" id="f_qev_amt" value="${v.price||0}">
+  <button class="btn btn-primary btn-block" style="margin-top:10px;" onclick="saveQuickEditVisit('${invId}','${visitId}')">保存 Save</button>
+  <button class="btn btn-danger btn-block" style="margin-top:10px;" onclick="deleteQuickEditVisit('${invId}','${visitId}')">删除这条记录 Delete</button>
+  `);
+}
+function saveQuickEditVisit(invId, visitId){
+  const inv = DB.invoices.find(x=>x.id===invId); if(!inv) return;
+  const v = (inv.visits||[]).find(x=>x.id===visitId); if(!v) return;
+  v.date = val('f_qev_date'); v.timeSlot = val('f_qev_slot'); v.price = Number(val('f_qev_amt'))||0;
+  save('invoices'); closeModal(); render(); toast('已更新 Updated');
+}
+function deleteQuickEditVisit(invId, visitId){
+  confirmAction('确定要删除这条服务记录吗？Delete this service record?', ()=>{
+    const inv = DB.invoices.find(x=>x.id===invId); if(!inv) return;
+    inv.visits = (inv.visits||[]).filter(x=>x.id!==visitId);
+    save('invoices'); closeModal(); render(); toast('已删除 Deleted');
+  });
+}
 function renderReports(){
   const basis = state.reportBasis || 'service';
   const monthMap = monthlyFinancials(basis);
@@ -1458,13 +1521,13 @@ function renderReports(){
     DB.invoices.forEach(inv=>{
       const c = DB.clients.find(x=>x.id===inv.clientId);
       (inv.visits||[]).forEach(v=>{
-        if((v.date||'').slice(0,7)===sel) visitsInMonth.push({date:v.date, amount:v.price, client:c?c.name:(inv.leadName||'—'), invNo:inv.no, invId:inv.id});
+        if((v.date||'').slice(0,7)===sel) visitsInMonth.push({date:v.date, amount:v.price, client:c?c.name:(inv.leadName||'—'), invNo:inv.no, invId:inv.id, visitId:v.id});
       });
     });
     visitsInMonth.sort((a,b)=> (a.date||'').localeCompare(b.date||''));
     incomeRows = visitsInMonth.length? visitsInMonth.map(v=>`
-      <div class="card tap" style="padding:12px 16px;" onclick="state.moneyTab='invoices'; state.invId='${v.invId}'; render();">
-        <div class="row"><div><div style="font-weight:800;">${fmt(v.amount)}</div><div class="muted">${v.date} · ${v.client} · ${v.invNo}</div></div><span style="color:var(--ink-light);">›</span></div>
+      <div class="card tap" style="padding:12px 16px;" onclick="openQuickEditVisit('${v.invId}','${v.visitId}')">
+        <div class="row"><div><div style="font-weight:800;">${fmt(v.amount)}</div><div class="muted">${v.date} · ${v.client} · ${v.invNo}</div></div><span style="color:var(--ink-light);">✏️</span></div>
       </div>`).join('') : `<div class="muted" style="padding:6px 4px 16px;">这个月还没有服务记录 No services this month</div>`;
   }
   const expensesInMonth = DB.expenses.filter(e=> (e.date||'').slice(0,7)===sel);
@@ -1505,6 +1568,17 @@ function renderReports(){
   ${incomeRows}
 
   <h3 style="margin:16px 2px 8px;">🧾 ${sel} 开销记录 Expenses (${expensesInMonth.length})</h3>
+  ${(()=>{
+    const byCat = {};
+    expensesInMonth.forEach(e=>{ byCat[e.category] = (byCat[e.category]||0) + Number(e.amount||0); });
+    const cats = Object.keys(byCat);
+    if(!cats.length) return '';
+    return `<div class="card" style="margin-bottom:10px;">
+      ${cats.map(cat=>`<div class="row" style="padding:4px 0;"><span>${cat}</span><span style="font-weight:800;">${fmt(byCat[cat])}</span></div>`).join('')}
+      <div class="divider"></div>
+      <div class="row" style="font-weight:800;"><span>合计 Total</span><span>${fmt(curData.expense)}</span></div>
+    </div>`;
+  })()}
   ${expensesInMonth.length? expensesInMonth.map(e=>`
     <div class="card" style="padding:12px 16px;"><div class="row"><div><div style="font-weight:800;">${fmt(e.amount)}</div><div class="muted">${e.date} · ${e.category}${e.note?(' · '+e.note):''}</div></div></div></div>`).join('') : `<div class="muted" style="padding:6px 4px 16px;">这个月还没有开销记录 No expenses this month</div>`}
   `;
@@ -1748,6 +1822,12 @@ function settingsHTML(){
   return `
   <div class="modalhead"><h2>设置 Settings</h2><button class="closex" onclick="closeModal()">✕</button></div>
 
+  <div class="card" style="background:#E9F1EA; border:none; margin-bottom:14px;">
+    <h3>📊 导出Excel Export to Excel</h3>
+    <div class="muted" style="font-size:12.5px; margin-bottom:10px;">把客户、账单、付款、开销全部导出成一份Excel文件，方便备份或用电脑核对。<br>Export clients, invoices, payments and expenses into one Excel file.</div>
+    <button class="btn btn-soft btn-block" onclick="exportToExcel()">导出Excel Export</button>
+  </div>
+
   <div class="card" style="background:#FCEBDD; border:none; margin-bottom:14px;">
     <h3>📥 导入历史数据 Import Data</h3>
     <div class="muted" style="font-size:12.5px; margin-bottom:10px;">从Excel等旧记录整理好的数据，粘贴JSON一次性导入客户和账单，不会删除已有资料。<br>Paste prepared JSON to bulk-import clients/invoices. Won't delete existing data.</div>
@@ -1861,10 +1941,69 @@ function doLogin(){
   });
 }
 function doLogout(){ if(fbAuth){ closeModal(); fbAuth.signOut(); } }
+function exportToExcel(){
+  if(typeof XLSX === 'undefined'){ toast('Excel导出组件加载失败，请检查网络 Excel export library failed to load'); return; }
+  try{
+    const wb = XLSX.utils.book_new();
+
+    const clientRows = DB.clients.map(c=>{
+      const st = clientStats(c);
+      return {
+        '客户ID': c.id, '姓名 Name': c.name, '电话 Phone': c.phone||'', '地址 Address': c.address||'',
+        '往返里程(km)': c.km||0, '猫咪 Pets': (c.pets||[]).map(p=>p.name).join('、'),
+        '服务次数 Services': st.serviceCount, '累计收入 Revenue': st.revenue,
+        '社交媒体授权 Social Consent': c.socialConsent==='yes'?'可以':(c.socialConsent==='no'?'不可以':'未确认'),
+        '已发布 Posted': c.socialPosted? '是':'否',
+      };
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(clientRows), 'Clients 客户');
+
+    const invRows = DB.invoices.map(inv=>{
+      const c = DB.clients.find(x=>x.id===inv.clientId);
+      const total = docTotal(inv); const paid=(inv.payments||[]).reduce((s,p)=>s+Number(p.amount),0);
+      return {
+        '账单号 No': inv.no, '客户 Client': c?c.name:(inv.leadName||''), '开始日期 Start': inv.startDate, '结束日期 End': inv.endDate,
+        '总额 Total': total, '已付 Paid': paid, '剩余 Remaining': Math.max(total-paid,0), '备注 Notes': inv.notes||'',
+      };
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(invRows), 'Invoices 账单');
+
+    const visitRows = [];
+    DB.invoices.forEach(inv=>{
+      const c = DB.clients.find(x=>x.id===inv.clientId);
+      (inv.visits||[]).forEach(v=>{
+        visitRows.push({ '账单号 No': inv.no, '客户 Client': c?c.name:(inv.leadName||''), '日期 Date': v.date, '时间段 Time Slot': v.timeSlot||'', '价格 Price': v.price||0 });
+      });
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(visitRows), 'Services 服务记录');
+
+    const payRows = [];
+    DB.invoices.forEach(inv=>{
+      const c = DB.clients.find(x=>x.id===inv.clientId);
+      (inv.payments||[]).forEach(p=>{
+        payRows.push({ '账单号 No': inv.no, '客户 Client': c?c.name:(inv.leadName||''), '日期 Date': p.date, '金额 Amount': p.amount, '方式 Method': p.method||'', '备注 Note': p.note||'' });
+      });
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(payRows), 'Payments 付款记录');
+
+    const expRows = DB.expenses.map(e=>{
+      const c = DB.clients.find(x=>x.id===e.clientId);
+      return { '日期 Date': e.date, '类别 Category': e.category, '金额 Amount': e.amount, '关联客户 Client': c?c.name:'', '可报销 Reimbursable': e.reimbursable?'是':'否', '备注 Note': e.note||'' };
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(expRows), 'Expenses 开销');
+
+    XLSX.writeFile(wb, `wisley-meowcare-${todayStr()}.xlsx`);
+    toast('Excel已导出 📊');
+  }catch(err){
+    console.error('Excel export failed:', err);
+    toast('导出失败 Export failed: '+(err&&err.message?err.message.slice(0,60):''));
+  }
+}
 function openImportUI(){
   openModal(`
   <div class="modalhead"><h2>导入数据 Import Data</h2><button class="closex" onclick="closeModal()">✕</button></div>
-  <div class="muted" style="margin-bottom:10px; font-size:12.5px; line-height:1.6;">把整理好的JSON数据粘贴到下面，点导入。会按ID去重合并，不会重复添加、也不会删除你现有的资料。<br>Paste the prepared JSON below and tap Import. Merges by ID — won't duplicate or delete existing data.</div>
+  <div class="muted" style="margin-bottom:10px; font-size:12.5px; line-height:1.6;">把整理好的JSON数据粘贴到下面，点导入。<br>Paste the prepared JSON below and tap Import.</div>
+  <div class="checkline" style="margin-bottom:10px;"><input type="checkbox" id="f_import_overwrite"> 如果ID已存在，覆盖更新（而不是跳过）<br><span class="muted" style="font-size:11.5px;">If ID already exists, overwrite it instead of skipping — use this when re-importing corrected data</span></div>
   <textarea id="f_import_json" style="min-height:180px; font-family:monospace; font-size:11.5px;" placeholder='{"clients":[...],"invoices":[...]}'></textarea>
   <button class="btn btn-primary btn-block" style="margin-top:10px;" onclick="runImport()">导入 Import</button>
   `);
@@ -1873,26 +2012,39 @@ function runImport(){
   let data;
   try{ data = JSON.parse(val('f_import_json')); }
   catch(e){ toast('JSON格式不对，请检查 Invalid JSON'); return; }
-  let addedClients=0, addedInvoices=0, addedExpenses=0, skipped=0;
+  const overwrite = document.getElementById('f_import_overwrite').checked;
+  let addedClients=0, addedInvoices=0, addedExpenses=0, updated=0, skipped=0;
   (data.clients||[]).forEach(c=>{
     if(!c.id) c.id = uid();
-    if(DB.clients.find(x=>x.id===c.id)){ skipped++; return; }
+    const existing = DB.clients.find(x=>x.id===c.id);
+    if(existing){
+      if(overwrite){ Object.assign(existing, c); updated++; } else { skipped++; }
+      return;
+    }
     DB.clients.push(c); addedClients++;
   });
   (data.invoices||[]).forEach(inv=>{
     if(!inv.id) inv.id = uid();
-    if(DB.invoices.find(x=>x.id===inv.id)){ skipped++; return; }
     if(!inv.payments) inv.payments=[];
+    const idx = DB.invoices.findIndex(x=>x.id===inv.id);
+    if(idx>-1){
+      if(overwrite){ DB.invoices[idx] = inv; updated++; } else { skipped++; }
+      return;
+    }
     DB.invoices.push(inv); addedInvoices++;
   });
   (data.expenses||[]).forEach(e=>{
     if(!e.id) e.id = uid();
-    if(DB.expenses.find(x=>x.id===e.id)){ skipped++; return; }
+    const existing = DB.expenses.find(x=>x.id===e.id);
+    if(existing){
+      if(overwrite){ Object.assign(existing, e); updated++; } else { skipped++; }
+      return;
+    }
     DB.expenses.push(e); addedExpenses++;
   });
   save('clients'); save('invoices'); save('expenses');
   closeModal(); render();
-  toast(`已导入 ${addedClients} 位客户、${addedInvoices} 张账单、${addedExpenses} 条开销${skipped? `（${skipped}条已存在，跳过）`:''} 🎉`);
+  toast(`已导入 ${addedClients} 位客户、${addedInvoices} 张账单、${addedExpenses} 条开销${updated? `，${updated}条已覆盖更新`:''}${skipped? `（${skipped}条已存在，跳过）`:''} 🎉`);
 }
 
 if(USE_FIREBASE && fbAuth){
