@@ -31,7 +31,7 @@
     --radius:22px;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
-  html,body{margin:0;padding:0; overflow-x:hidden;}
+  html,body{margin:0;padding:0; overflow-x:hidden; overscroll-behavior-y:contain;}
   body{font-family:'Nunito',sans-serif; background:var(--bg); color:var(--ink); display:flex; justify-content:center;}
   #shell{
     width:100%; max-width:460px; min-height:100vh; background:var(--bg); position:relative; padding-bottom:92px; overflow-x:hidden;
@@ -88,9 +88,9 @@
   #modalRoot{position:fixed; inset:0; z-index:100; display:none;}
   #modalRoot.open{display:flex; align-items:flex-end; justify-content:center;}
   #modalOverlay{position:absolute; inset:0; background:rgba(50,40,25,0.38);}
-  #modalCard{position:relative; width:100%; max-width:460px; max-height:88vh; overflow-y:auto; background:var(--bg); border-radius:26px 26px 0 0; padding:18px 18px 26px; animation:slideup .18s ease-out;}
+  #modalCard{position:relative; width:100%; max-width:460px; max-height:88vh; overflow-y:auto; overscroll-behavior:contain; background:var(--bg); border-radius:26px 26px 0 0; padding:0 18px 26px; animation:slideup .18s ease-out;}
   @keyframes slideup{from{transform:translateY(30px); opacity:0;} to{transform:translateY(0);opacity:1;}}
-  .modalhead{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+  .modalhead{display:flex; align-items:center; justify-content:space-between; margin:0 -18px 14px; padding:18px 18px 10px; position:sticky; top:0; background:var(--bg); z-index:5;}
   .closex{width:32px;height:32px;border-radius:12px;background:var(--card-alt); border:none; display:flex;align-items:center;justify-content:center; cursor:pointer; color:var(--ink-light); font-size:16px;}
   table.simple{width:100%; border-collapse:collapse; font-size:13.5px;}
   table.simple th{text-align:left; color:var(--ink-light); font-size:11.5px; padding:4px 6px; font-weight:800;}
@@ -1339,7 +1339,7 @@ function genPDF(type, id, mode){
   const qrBlocks = (DB.settings.qrCodes||[]).map(q=>`
     <div style="background:#fff; border:1px solid #EDE2D0; border-radius:16px; padding:14px; text-align:center; margin-bottom:14px;">
       <div style="font-weight:800; margin-bottom:8px;">${q.label||'收款码 Payment QR'}</div>
-      <img src="${q.image}" style="width:150px;height:150px;object-fit:contain;">
+      <img src="${q.image}" style="width:150px;height:auto;display:block;margin:0 auto;">
     </div>`).join('');
 
   const estBox = km? `
@@ -1424,6 +1424,9 @@ function genPDF(type, id, mode){
   const waitForImages = Promise.all(imgs.map(img=> img.complete ? Promise.resolve() : new Promise(res=>{ img.onload=res; img.onerror=res; })));
 
   waitForImages.then(()=> html2canvas(wrap, {scale:1.5, backgroundColor:'#ffffff', useCORS:true})).then(canvas=>{
+    const wrapRect = wrap.getBoundingClientRect();
+    const wrapWidthPx = wrap.offsetWidth;
+    const rowBoundariesPx = Array.from(wrap.querySelectorAll('table tr')).map(tr=> tr.getBoundingClientRect().bottom - wrapRect.top);
     document.body.removeChild(wrap);
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF('p','mm','a4');
@@ -1433,15 +1436,21 @@ function genPDF(type, id, mode){
     if(imgH <= pageH){
       pdf.addImage(imgData, 'JPEG', 0, 0, pageW, imgH);
     } else {
-      // split across multiple pages
-      let heightLeft = imgH, position = 0;
-      pdf.addImage(imgData, 'JPEG', 0, position, pageW, imgH);
-      heightLeft -= pageH;
-      while(heightLeft > 0){
-        position -= pageH; pdf.addPage();
-        pdf.addImage(imgData, 'JPEG', 0, position, pageW, imgH);
-        heightLeft -= pageH;
+      // Compute safe page-break points that avoid slicing through a table row.
+      const mmPerPx = pageW / wrapWidthPx;
+      const rowBoundariesMM = rowBoundariesPx.map(px=>px*mmPerPx).filter(v=> v>0 && v<imgH);
+      const tolerance = pageH*0.3;
+      const breaks = [];
+      let naive = pageH, prevBreak = 0;
+      while(naive < imgH){
+        let best = naive;
+        rowBoundariesMM.forEach(rb=>{ if(rb>prevBreak && rb<=naive && (naive-rb)<=tolerance) best = rb; });
+        breaks.push(best);
+        prevBreak = best;
+        naive = best + pageH;
       }
+      pdf.addImage(imgData, 'JPEG', 0, 0, pageW, imgH);
+      breaks.forEach(b=>{ pdf.addPage(); pdf.addImage(imgData, 'JPEG', 0, -b, pageW, imgH); });
     }
     if(mode==='inline'){
       openModal(`
