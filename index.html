@@ -89,8 +89,10 @@
   .empty .emoji{font-size:44px; display:block; margin-bottom:10px;}
   .avatar{width:44px;height:44px;border-radius:14px; display:flex;align-items:center;justify-content:center; color:#fff; font-weight:800; font-size:15px; flex:none;}
   .searchbar{position:relative;}
-  .searchbar input{padding-left:36px;}
+  .searchbar input{padding-left:36px; padding-right:36px;}
   .searchbar .sic{position:absolute; left:12px; top:11px; opacity:0.5;}
+  .searchbar .clr{position:absolute; right:8px; top:6px; width:26px; height:26px; border:none; background:none; color:var(--ink-light); font-size:15px; cursor:pointer; display:none;}
+  .searchbar.has-value .clr{display:block;}
   #modalRoot{position:fixed; inset:0; z-index:100; display:none;}
   #modalRoot.open{display:flex; align-items:flex-end; justify-content:center;}
   #modalOverlay{position:absolute; inset:0; background:rgba(50,40,25,0.38);}
@@ -516,9 +518,10 @@ function renderClientList(){
     .slice().sort((a,b)=> a.name.localeCompare(b.name, undefined, {sensitivity:'base'}));
   return `
   <h1>${tr('clientsTitle')}</h1>
-  <div class="searchbar" style="margin-bottom:14px;">
+  <div class="searchbar ${window.__clientQuery?'has-value':''}" style="margin-bottom:14px;">
     <span class="sic">🔍</span>
     <input id="clientSearchInput" placeholder="${tr('searchClient')}" value="${window.__clientQuery||''}" oninput="window.__clientQuery=this.value; render();">
+    <button class="clr" onclick="window.__clientQuery=''; render();">✕</button>
   </div>
   ${list.length? list.map(c=>{
       const pets=c.pets||[];
@@ -970,16 +973,36 @@ function renderDocList(type){
       return name.includes(q) || (d.no||'').toLowerCase().includes(q);
     });
   }
-  const searchBox = `<input id="docSearchInput" placeholder="搜索客户姓名或单号 Search by client name or no." value="${window.__docQuery||''}" oninput="window.__docQuery=this.value; render();" style="margin-bottom:12px;">`;
+  const searchBox = `<div class="searchbar ${window.__docQuery?'has-value':''}" style="margin-bottom:12px;">
+    <span class="sic">🔍</span>
+    <input id="docSearchInput" placeholder="搜索客户姓名或单号 Search by client name or no." value="${window.__docQuery||''}" oninput="window.__docQuery=this.value; render();">
+    <button class="clr" onclick="window.__docQuery=''; render();">✕</button>
+  </div>`;
   if(type==='invoice'){
+    const filter = window.__invFilter || 'all';
+    if(filter!=='all'){
+      list = list.filter(i=>{
+        const st = invStatus(i);
+        if(filter==='paid') return st.label==='已付清';
+        if(filter==='partial') return st.label==='部分付款';
+        if(filter==='unpaid') return st.label==='待付款';
+        if(filter==='overdue') return st.label==='已逾期';
+        return true;
+      });
+    }
+    const filterChips = [['all','全部 All'],['unpaid','待付款'],['partial','部分付款'],['overdue','已逾期'],['paid','已付清']];
+    const filterBar = `<div class="row" style="gap:6px; margin-bottom:12px; overflow-x:auto; flex-wrap:nowrap;">
+      ${filterChips.map(([k,l])=>`<div class="subchip ${filter===k?'active':''}" style="flex:none; white-space:nowrap;" onclick="window.__invFilter='${k}'; render();">${l}</div>`).join('')}
+    </div>`;
     const outstanding = list.reduce((s,i)=>{ const t=docTotal(i); const p=(i.payments||[]).reduce((a,b)=>a+Number(b.amount),0); return s+Math.max(t-p,0); },0);
     return `
     ${searchBox}
+    ${filterBar}
     <div class="statgrid" style="margin-bottom:14px;">
       <div class="statcard"><div class="v">${list.length}</div><div class="l">账单总数</div></div>
       <div class="statcard"><div class="v" style="color:var(--peach-dark)">${fmt(outstanding)}</div><div class="l">未收款项</div></div>
     </div>
-    ${list.length? list.slice().reverse().map(i=>invoiceRow(i)).join('') : `<div class="card empty"><span class="emoji">🧾</span>${q?'没找到符合的账单 No matching invoices':'还没有账单，点击右下角 ＋ 新建'}</div>`}
+    ${list.length? list.slice().reverse().map(i=>invoiceRow(i)).join('') : `<div class="card empty"><span class="emoji">🧾</span>${(q||filter!=='all')?'没找到符合的账单 No matching invoices':'还没有账单，点击右下角 ＋ 新建'}</div>`}
     `;
   }
   const stmap={draft:['gray','草稿'],sent:['orange','已发送'],accepted:['green','已接受']};
