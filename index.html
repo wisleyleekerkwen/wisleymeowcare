@@ -328,7 +328,7 @@ const I18N = {
     pending:'待处理', prepared:'已准备', sent:'✓ 已送出',
     clientsTitle:'客户', searchClient:'搜索客户姓名', noClients:'还没有客户，点击右下角 ＋ 添加',
     scheduleTitle:'日程', apptOfDay:'的行程', exportNew:'⤓ 导出新增日程', exportAll:'导出全部', noApptDay:'这天还没有安排',
-    moneyTitle:'账目', invoices:'账单', quotes:'报价', expenses:'开销', analytics:'客户分析',
+    moneyTitle:'账目', invoices:'账单', quotes:'报价', expenses:'开销', analytics:'客户分析', reports:'报表',
     save:'保存', cancel:'取消', delete:'删除', edit:'编辑', add:'＋ 添加', confirm:'确认',
     settings:'设置',
   },
@@ -339,7 +339,7 @@ const I18N = {
     pending:'Pending', prepared:'Prepared', sent:'✓ Sent',
     clientsTitle:'Clients', searchClient:'Search client name', noClients:'No clients yet — tap ＋ to add',
     scheduleTitle:'Schedule', apptOfDay:'schedule', exportNew:'⤓ Export New', exportAll:'Export All', noApptDay:'Nothing scheduled this day',
-    moneyTitle:'Money', invoices:'Invoice', quotes:'Quote', expenses:'Expense', analytics:'Analytics',
+    moneyTitle:'Money', invoices:'Invoice', quotes:'Quote', expenses:'Expense', analytics:'Analytics', reports:'Reports',
     save:'Save', cancel:'Cancel', delete:'Delete', edit:'Edit', add:'＋ Add', confirm:'Confirm',
     settings:'Settings',
   }
@@ -408,13 +408,48 @@ function render(){
 }
 
 /* ---------------- TODAY ---------------- */
+function monthlyFinancials(basis){
+  const map = {};
+  function ensure(m){ if(!map[m]) map[m]={income:0, expense:0}; return map[m]; }
+  if(basis==='cash'){
+    DB.invoices.forEach(inv=>{
+      (inv.payments||[]).forEach(p=>{
+        const m=(p.date||'').slice(0,7); if(!m) return;
+        ensure(m).income += Number(p.amount)||0;
+      });
+    });
+  } else {
+    DB.invoices.forEach(inv=>{
+      (inv.visits||[]).forEach(v=>{
+        const m=(v.date||'').slice(0,7); if(!m) return;
+        ensure(m).income += Number(v.price)||0;
+      });
+      if(inv.cctv && inv.cctv.needed){
+        const dayRate = Number(inv.cctv.rate)||0;
+        const numDays = Number(inv.cctv.days)||0;
+        if(numDays>0 && inv.startDate){
+          let d = new Date(inv.startDate+'T00:00:00');
+          for(let i=0;i<numDays;i++){
+            const m = d.toISOString().slice(0,7);
+            ensure(m).income += dayRate;
+            d.setDate(d.getDate()+1);
+          }
+        }
+      }
+    });
+  }
+  DB.expenses.forEach(e=>{
+    const m=(e.date||'').slice(0,7); if(!m) return;
+    ensure(m).expense += Number(e.amount)||0;
+  });
+  return map;
+}
 function renderToday(){
   const t = todayStr();
   const todays = DB.appointments.filter(a=>a.date===t).sort((a,b)=>(a.start||'').localeCompare(b.start||''));
   const upcoming = DB.appointments.filter(a=>a.date>t).length;
   const monthPrefix = t.slice(0,7);
-  let monthIncome=0;
-  DB.invoices.forEach(inv=> (inv.payments||[]).forEach(p=>{ if((p.date||'').slice(0,7)===monthPrefix) monthIncome+=Number(p.amount); }));
+  const monthIncome = (monthlyFinancials('service')[monthPrefix] || {income:0}).income;
   let outstanding=0;
   DB.invoices.forEach(inv=>{ const paid=(inv.payments||[]).reduce((s,p)=>s+Number(p.amount),0); const tot=docTotal(inv); if(tot-paid>0.001) outstanding += (tot-paid); });
   const giftEligible = DB.clients.map(c=>({c, st:clientStats(c)})).filter(x=>x.st.serviceCount>=10);
@@ -558,6 +593,14 @@ function renderClientDetail(id){
   </div>
 
   <div class="card">
+    <h3>📱 社交媒体 Social Media</h3>
+    <div class="row" style="gap:8px; flex-wrap:wrap;">
+      <span class="pill ${c.socialConsent==='yes'?'green':(c.socialConsent==='no'?'red':'gray')}">${c.socialConsent==='yes'?'✓ 可以发布 Consented':(c.socialConsent==='no'?'✗ 不可以 Declined':'○ 未确认 Not confirmed')}</span>
+      ${c.socialConsent==='yes'? `<span class="pill ${c.socialPosted?'green':'gray'}">${c.socialPosted?'✓ 已发布 Posted':'○ 未发布 Not posted yet'}</span>` : ''}
+    </div>
+  </div>
+
+  <div class="card">
     <h3>💸 开销标记</h3>
     <div class="row" style="flex-wrap:wrap; gap:8px;">
       <span class="pill ${st.hasParking?'orange':'gray'}">${st.hasParking?'✓':'✗'} 停车费</span>
@@ -583,7 +626,7 @@ function petCard(clientId,p){
         ${p.photo? `<img src="${p.photo}" style="width:52px;height:52px;border-radius:14px;object-fit:cover;">` : `<div class="avatar" style="background:var(--card-alt); color:var(--ink-light);">🐾</div>`}
         <div>
           <div style="font-weight:800;">${p.name} <span class="muted" style="font-weight:600;">· ${p.gender||'未知'}</span></div>
-          <div class="muted" style="margin-top:3px;">生病/怀孕：${p.sickPregnant||'否'} · CCTV需要：${p.cctvNeeded?'是':'否'}</div>
+          <div class="muted" style="margin-top:3px;">生病/怀孕：${p.sickPregnant||'否'}</div>
           ${p.medical? `<div class="muted" style="margin-top:4px;">🩺 ${p.medical}</div>`:''}
           ${p.notes? `<div class="muted" style="margin-top:4px;">📝 ${p.notes}</div>`:''}
         </div>
@@ -607,6 +650,15 @@ function openClientForm(id){
   <div class="divider"></div>
   <h3>📝 居家须知 Q&A</h3>
   ${QA_FIELDS.map(([k,label])=>`<label class="flabel">${label}</label><input id="f_qa_${k}" value="${care[k]||''}" placeholder="填写答案">`).join('')}
+  <div class="divider"></div>
+  <h3>📱 社交媒体 Social Media</h3>
+  <label class="flabel">是否可以把猫咪的vlog发在社交媒体上？Can we post the cat's vlog on social media?</label>
+  <select id="f_social_consent">
+    <option value="" ${!c||!c.socialConsent?'selected':''}>未确认 Not confirmed</option>
+    <option value="yes" ${c&&c.socialConsent==='yes'?'selected':''}>可以 Yes</option>
+    <option value="no" ${c&&c.socialConsent==='no'?'selected':''}>不可以 No</option>
+  </select>
+  <div class="checkline"><input type="checkbox" id="f_social_posted" ${c&&c.socialPosted?'checked':''}> 已发布 Already posted</div>
   <div class="divider"></div>
   <div class="row" style="margin-bottom:10px;"><h3 style="margin:0;">🐱 宠物档案</h3><button class="btn btn-soft btn-sm" onclick="addPetRow()">＋ 添加宠物</button></div>
   <div id="cpetsWrap"></div>
@@ -640,13 +692,12 @@ function renderPetRows(){
           <option value="是" ${p.sickPregnant==='是'?'selected':''}>生病/怀孕：是</option>
         </select>
       </div>
-      <div class="checkline"><input type="checkbox" ${p.cctvNeeded?'checked':''} onchange="window.__cpets[${idx}].cctvNeeded=this.checked"> 需要 CCTV 监视器</div>
       <textarea placeholder="病史" style="min-height:40px;" oninput="window.__cpets[${idx}].medical=this.value">${p.medical||''}</textarea>
       <textarea placeholder="注意事项 / 性格" style="min-height:40px; margin-bottom:0;" oninput="window.__cpets[${idx}].notes=this.value">${p.notes||''}</textarea>
     </div>
   `).join('');
 }
-function addPetRow(){ window.__cpets.push({id:uid(), name:'', gender:'未知', sickPregnant:'否', cctvNeeded:false, medical:'', notes:'', photo:''}); renderPetRows(); }
+function addPetRow(){ window.__cpets.push({id:uid(), name:'', gender:'未知', sickPregnant:'否', medical:'', notes:'', photo:''}); renderPetRows(); }
 function onCPetPhoto(ev, idx){
   const file = ev.target.files[0]; if(!file) return;
   resizeImageFile(file, 900, (dataUrl)=>{ window.__cpets[idx].photo = dataUrl; renderPetRows(); });
@@ -661,6 +712,8 @@ function saveClient(id){
     name, phone:val('f_phone').trim(), address:val('f_addr').trim(),
     keyInfo:val('f_key').trim(), parking:val('f_park').trim(),
     km:Number(val('f_km'))||0, careInfo, pets,
+    socialConsent: val('f_social_consent'),
+    socialPosted: document.getElementById('f_social_posted').checked,
   };
   if(id){ Object.assign(DB.clients.find(x=>x.id===id), data); }
   else { data.id=uid(); DB.clients.push(data); state.clientId=data.id; }
@@ -697,7 +750,6 @@ function openPetForm(clientId, petId){
   </select>
   <label class="flabel">生病 / 怀孕？</label>
   <select id="f_petsick"><option value="否" ${!p||p.sickPregnant==='否'?'selected':''}>否</option><option value="是" ${p&&p.sickPregnant==='是'?'selected':''}>是</option></select>
-  <div class="checkline"><input type="checkbox" id="f_petcctv" ${p&&p.cctvNeeded?'checked':''}> 需要 CCTV 监视器</div>
   <label class="flabel">病史</label><textarea id="f_petmed" placeholder="过往病史、正在服用的药物等">${p?p.medical||'':''}</textarea>
   <label class="flabel">注意事项</label><textarea id="f_petnotes" placeholder="喂食习惯、性格、需要特别注意的地方">${p?p.notes||'':''}</textarea>
   <button class="btn btn-primary btn-block" onclick="savePet('${clientId}','${petId||''}')">保存宠物</button>
@@ -714,7 +766,6 @@ function savePet(clientId, petId){
   if(!name){ toast('请填写宠物名字'); return; }
   const data = {
     name, gender:val('f_petgender'), sickPregnant:val('f_petsick'),
-    cctvNeeded:document.getElementById('f_petcctv').checked,
     medical:val('f_petmed').trim(), notes:val('f_petnotes').trim(), photo:val('f_petphoto'),
   };
   if(!c.pets) c.pets=[];
@@ -858,11 +909,12 @@ function downloadFile(filename, content, mime){
 
 /* ---------------- MONEY ---------------- */
 function renderMoney(){
-  const tabs = [['quotes',tr('quotes')],['invoices',tr('invoices')],['expenses',tr('expenses')],['analytics',tr('analytics')]];
+  const tabs = [['quotes',tr('quotes')],['invoices',tr('invoices')],['expenses',tr('expenses')],['reports',tr('reports')],['analytics',tr('analytics')]];
   let body='';
   if(state.moneyTab==='invoices') body = state.invId? renderDocDetail('invoice',state.invId) : renderDocList('invoice');
   else if(state.moneyTab==='quotes') body = state.quoteId? renderDocDetail('quote',state.quoteId) : renderDocList('quote');
   else if(state.moneyTab==='expenses') body = renderExpenses();
+  else if(state.moneyTab==='reports') body = renderReports();
   else if(state.moneyTab==='analytics') body = renderAnalytics();
   return `
   <h1>${tr('moneyTitle')}</h1>
@@ -1164,7 +1216,7 @@ function renderDocDetail(type, id){
     <button class="btn btn-danger btn-block" onclick="deleteDoc('${type}','${doc.id}')">删除</button>
   </div>
   ${type==='invoice'? `<h3 style="margin:16px 2px 8px;">付款记录 Payments</h3>${(doc.payments||[]).length? doc.payments.map((p,idx)=>({p,idx})).reverse().map(({p,idx})=>`
-    <div class="card" style="padding:12px 16px;"><div class="row"><div><div style="font-weight:800;">${fmt(p.amount)}</div><div class="muted">${p.date} · ${p.method}${p.note?(' · '+p.note):''}</div></div><button class="miniremove" onclick="deletePayment('${doc.id}', ${idx})">✕</button></div></div>`).join('') : `<div class="muted" style="padding:6px 4px 20px;">还没有付款记录 No payments yet</div>`}` : ''}
+    <div class="card" style="padding:12px 16px;"><div class="row"><div class="tap" style="flex:1;" onclick="openPaymentEditForm('${doc.id}', ${idx})"><div style="font-weight:800;">${fmt(p.amount)}</div><div class="muted">${p.date} · ${p.method}${p.note?(' · '+p.note):''}</div></div><button class="miniremove" onclick="deletePayment('${doc.id}', ${idx})">✕</button></div></div>`).join('') : `<div class="muted" style="padding:6px 4px 20px;">还没有付款记录 No payments yet</div>`}` : ''}
   `;
 }
 function deleteDoc(type,id){
@@ -1292,6 +1344,32 @@ function deletePayment(invId, idx){
     save('invoices'); render(); toast('已删除付款记录 Payment deleted');
   });
 }
+function openPaymentEditForm(invId, idx){
+  const inv = DB.invoices.find(x=>x.id===invId);
+  const p = inv.payments[idx];
+  if(!p) return;
+  openModal(`
+  <div class="modalhead"><h2>编辑付款记录 Edit Payment</h2><button class="closex" onclick="closeModal()">✕</button></div>
+  <div class="muted" style="margin-bottom:10px; font-size:12.5px;">改这里不会影响别的记录，日期也会保留你填的原始日期，不会自动跳成今天。<br>Editing here keeps whatever date you set — it won't jump to today.</div>
+  <label class="flabel">金额 Amount</label><input type="number" id="f_payedit_amt" value="${p.amount}">
+  <label class="flabel">日期 Date</label><input type="date" id="f_payedit_date" value="${p.date}">
+  <label class="flabel">付款方式 Method</label><select id="f_payedit_method"><option ${p.method==='现金'?'selected':''}>现金</option><option ${p.method==='银行转账'?'selected':''}>银行转账</option><option ${p.method==='电子钱包'?'selected':''}>电子钱包</option><option ${(p.method==='其他'||p.method==='历史记录 Imported')?'selected':''}>其他</option></select>
+  <label class="flabel">备注 Note</label><input id="f_payedit_note" value="${p.note||''}" placeholder="参考编号等">
+  <button class="btn btn-primary btn-block" style="margin-top:10px;" onclick="savePaymentEdit('${invId}', ${idx})">保存 Save</button>
+  `);
+}
+function savePaymentEdit(invId, idx){
+  const amt = Number(val('f_payedit_amt'));
+  if(!amt || amt<=0){ toast('请输入有效金额'); return; }
+  const inv = DB.invoices.find(x=>x.id===invId);
+  const p = inv.payments[idx];
+  if(!p) return;
+  const otherPaid = inv.payments.reduce((s,pp,i)=> i===idx? s : s+Number(pp.amount), 0);
+  const total = docTotal(inv);
+  if(otherPaid + amt > total + 0.01){ toast(`超过账单总额，剩余可填 ${fmt(Math.max(total-otherPaid,0))}`); return; }
+  p.amount = amt; p.date = val('f_payedit_date'); p.method = val('f_payedit_method'); p.note = val('f_payedit_note').trim();
+  save('invoices'); closeModal(); render(); toast('付款记录已更新 Payment updated');
+}
 
 /* ---- expenses ---- */
 function renderExpenses(){
@@ -1336,6 +1414,97 @@ function saveExpense(){
 /* 服务细节选项现在只在 ⚙️设置 里管理，避免出现两份不同步的清单 */
 
 /* ---- analytics ---- */
+function renderReports(){
+  const basis = state.reportBasis || 'service';
+  const monthMap = monthlyFinancials(basis);
+  const t = todayStr(); const curMonth = t.slice(0,7);
+  if(!monthMap[curMonth]) monthMap[curMonth] = {income:0, expense:0};
+  const months = Object.keys(monthMap).sort();
+  const recentMonths = months.slice(-12);
+  const maxVal = Math.max(1, ...recentMonths.map(m=>Math.max(monthMap[m].income, monthMap[m].expense)));
+  const sel = (state.reportMonth && monthMap[state.reportMonth]) ? state.reportMonth : curMonth;
+
+  const chartBars = recentMonths.map(m=>{
+    const inc = monthMap[m].income, exp = monthMap[m].expense;
+    const incH = Math.max(2, Math.round(inc/maxVal*100)), expH = Math.max(2, Math.round(exp/maxVal*100));
+    return `<div style="display:flex; flex-direction:column; align-items:center; flex:0 0 auto; width:38px; cursor:pointer;" onclick="state.reportMonth='${m}'; render();">
+      <div style="display:flex; align-items:flex-end; gap:3px; height:100px;">
+        <div style="width:11px; background:var(--sage); border-radius:3px 3px 0 0; height:${incH}%;"></div>
+        <div style="width:11px; background:var(--peach); border-radius:3px 3px 0 0; height:${expH}%;"></div>
+      </div>
+      <div class="muted" style="font-size:9.5px; margin-top:5px; ${m===sel?'color:var(--sage-dark);font-weight:800;':''}">${m.slice(5)}</div>
+    </div>`;
+  }).join('');
+
+  const curData = monthMap[sel] || {income:0, expense:0};
+
+  // Detail list matching the selected basis
+  let incomeRows = '';
+  if(basis==='cash'){
+    const paymentsInMonth = [];
+    DB.invoices.forEach(inv=>{
+      const c = DB.clients.find(x=>x.id===inv.clientId);
+      (inv.payments||[]).forEach(p=>{
+        if((p.date||'').slice(0,7)===sel) paymentsInMonth.push({date:p.date, amount:p.amount, client:c?c.name:(inv.leadName||'—'), invNo:inv.no, invId:inv.id});
+      });
+    });
+    paymentsInMonth.sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+    incomeRows = paymentsInMonth.length? paymentsInMonth.map(p=>`
+      <div class="card tap" style="padding:12px 16px;" onclick="state.moneyTab='invoices'; state.invId='${p.invId}'; render();">
+        <div class="row"><div><div style="font-weight:800;">${fmt(p.amount)}</div><div class="muted">${p.date} · ${p.client} · ${p.invNo}</div></div><span style="color:var(--ink-light);">›</span></div>
+      </div>`).join('') : `<div class="muted" style="padding:6px 4px 16px;">这个月还没有收款记录 No payments this month</div>`;
+  } else {
+    const visitsInMonth = [];
+    DB.invoices.forEach(inv=>{
+      const c = DB.clients.find(x=>x.id===inv.clientId);
+      (inv.visits||[]).forEach(v=>{
+        if((v.date||'').slice(0,7)===sel) visitsInMonth.push({date:v.date, amount:v.price, client:c?c.name:(inv.leadName||'—'), invNo:inv.no, invId:inv.id});
+      });
+    });
+    visitsInMonth.sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+    incomeRows = visitsInMonth.length? visitsInMonth.map(v=>`
+      <div class="card tap" style="padding:12px 16px;" onclick="state.moneyTab='invoices'; state.invId='${v.invId}'; render();">
+        <div class="row"><div><div style="font-weight:800;">${fmt(v.amount)}</div><div class="muted">${v.date} · ${v.client} · ${v.invNo}</div></div><span style="color:var(--ink-light);">›</span></div>
+      </div>`).join('') : `<div class="muted" style="padding:6px 4px 16px;">这个月还没有服务记录 No services this month</div>`;
+  }
+  const expensesInMonth = DB.expenses.filter(e=> (e.date||'').slice(0,7)===sel);
+
+  return `
+  <div class="row" style="gap:8px; margin-bottom:10px;">
+    <div class="subchip ${basis==='service'?'active':''}" style="flex:1; text-align:center;" onclick="state.reportBasis='service'; render();">📆 服务收入 Revenue</div>
+    <div class="subchip ${basis==='cash'?'active':''}" style="flex:1; text-align:center;" onclick="state.reportBasis='cash'; render();">💵 现金流 Cash Flow</div>
+  </div>
+  <div class="muted" style="font-size:12px; margin:-2px 2px 14px;">${basis==='service'? '按服务发生的日期统计收入 Revenue counted by the date the service happened' : '按实际收款的日期统计 Counted by the date payment was actually received'}</div>
+
+  <div class="statgrid" style="margin-bottom:14px;">
+    <div class="statcard"><div class="v" style="color:var(--sage-dark)">${fmt(curData.income)}</div><div class="l">${sel} 收入 Income</div></div>
+    <div class="statcard"><div class="v" style="color:var(--peach-dark)">${fmt(curData.expense)}</div><div class="l">${sel} 开销 Expense</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:14px;">
+    <h3>📈 近12个月走势 Trend</h3>
+    <div class="row" style="gap:14px; margin-bottom:10px; font-size:11.5px;">
+      <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--sage);margin-right:4px;"></span>收入 Income</span>
+      <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--peach);margin-right:4px;"></span>开销 Expense</span>
+    </div>
+    <div style="display:flex; align-items:flex-end; gap:8px; overflow-x:auto; padding-bottom:4px;">${chartBars || '<div class="muted">还没有数据 No data yet</div>'}</div>
+  </div>
+
+  <div class="card" style="margin-bottom:14px;">
+    <label class="flabel">按月查看 View by Month</label>
+    <select onchange="state.reportMonth=this.value; render();" style="margin-bottom:0;">
+      ${months.slice().reverse().map(m=>`<option value="${m}" ${m===sel?'selected':''}>${m}</option>`).join('')}
+    </select>
+  </div>
+
+  <h3 style="margin:16px 2px 8px;">${basis==='service'? '📆' : '💰'} ${sel} ${basis==='service'?'服务记录 Services':'收款记录 Payments'}</h3>
+  ${incomeRows}
+
+  <h3 style="margin:16px 2px 8px;">🧾 ${sel} 开销记录 Expenses (${expensesInMonth.length})</h3>
+  ${expensesInMonth.length? expensesInMonth.map(e=>`
+    <div class="card" style="padding:12px 16px;"><div class="row"><div><div style="font-weight:800;">${fmt(e.amount)}</div><div class="muted">${e.date} · ${e.category}${e.note?(' · '+e.note):''}</div></div></div></div>`).join('') : `<div class="muted" style="padding:6px 4px 16px;">这个月还没有开销记录 No expenses this month</div>`}
+  `;
+}
 function renderAnalytics(){
   if(DB.clients.length===0) return `<div class="card empty"><span class="emoji">📊</span>还没有客户数据</div>`;
   const rows = DB.clients.map(c=>({c, st:clientStats(c)})).sort((a,b)=>b.st.revenue-a.st.revenue);
@@ -1394,7 +1563,6 @@ function genPDF(type, id, mode){
           <tr><td style="color:#9C8F7E; padding:3px 0; width:40%;">Pet Name</td><td style="font-weight:700;">${p.name}</td></tr>
           <tr><td style="color:#9C8F7E; padding:3px 0;">Gender</td><td>${p.gender||'—'}</td></tr>
           <tr><td style="color:#9C8F7E; padding:3px 0;">Sick/Pregnant?</td><td>${p.sickPregnant==='是'?'Yes 是':'No 否'}</td></tr>
-          <tr><td style="color:#9C8F7E; padding:3px 0;">CCTV needed?</td><td>${p.cctvNeeded?'Yes':'No'}</td></tr>
           <tr><td style="color:#9C8F7E; padding:3px 0; vertical-align:top;">Remarks</td><td style="white-space:pre-line;">${p.notes||p.medical||'—'}</td></tr>
         </table>
       </div>
