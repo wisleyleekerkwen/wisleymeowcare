@@ -14,8 +14,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
@@ -471,7 +469,6 @@ function render(){
   else if(state.tab==='reports') el.innerHTML = `<h1>${tr('reports')}</h1>` + renderReports();
   else if(state.tab==='social') el.innerHTML = renderSocial();
 
-  if(state.tab==='today') setTimeout(initTerritoryMap, 0);
 
   if(activeId){
     const restored = document.getElementById(activeId);
@@ -555,7 +552,7 @@ function renderToday(){
   <div class="card" style="margin-bottom:16px; padding:14px;">
     <h3 style="margin:0 0 4px;">🚩 我的领地 My Territory</h3>
     <div class="muted" style="font-size:12px; margin-bottom:10px;">每位客户地址上的一面旗 A flag for every client address</div>
-    <div id="territoryMapContainer" style="width:100%; height:260px; border-radius:14px; overflow:hidden; background:var(--card-alt);"></div>
+    <div id="territoryMapContainer">${renderTerritoryBoard()}</div>
   </div>
   <div class="card" style="margin-bottom:16px; padding:14px;">
     <h3 style="margin:0 0 4px;">🎂 猫咪生日/纪念日 Cat Birthdays</h3>
@@ -748,50 +745,32 @@ function downloadCalendarImage(){
   });
 }
 
-let __territoryMap = null, __territoryMarkersLayer = null, __geocodingInProgress = false;
-function initTerritoryMap(){
-  if(typeof L === 'undefined') return;
-  const container = document.getElementById('territoryMapContainer');
-  if(!container) return;
-  __territoryMap = L.map(container, {scrollWheelZoom:false}).setView([3.0733,101.5951], 12);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
-  }).addTo(__territoryMap);
-  __territoryMarkersLayer = L.layerGroup().addTo(__territoryMap);
-  refreshTerritoryMarkers();
-  geocodeMissingClients();
+function hashStr(s){
+  let h = 0;
+  for(let i=0;i<s.length;i++){ h = (h*31 + s.charCodeAt(i)) >>> 0; }
+  return h;
 }
-function refreshTerritoryMarkers(){
-  if(!__territoryMap || !__territoryMarkersLayer) return;
-  __territoryMarkersLayer.clearLayers();
-  const flagIcon = L.divIcon({html:'🚩', className:'flag-marker', iconSize:[26,26], iconAnchor:[4,24]});
-  const bounds = [];
-  DB.clients.forEach(c=>{
-    if(c.lat && c.lng){
-      L.marker([c.lat,c.lng], {icon:flagIcon}).addTo(__territoryMarkersLayer).bindPopup(`<b>${c.name}</b>`);
-      bounds.push([c.lat,c.lng]);
-    }
-  });
-  if(bounds.length) __territoryMap.fitBounds(bounds, {padding:[30,30], maxZoom:14});
-}
-async function geocodeMissingClients(){
-  if(__geocodingInProgress) return;
-  const todo = DB.clients.filter(c=> c.address && c.address.trim() && !c.lat);
-  if(!todo.length) return;
-  __geocodingInProgress = true;
-  for(const c of todo){
-    try{
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(c.address)}`);
-      const data = await res.json();
-      if(data && data[0]){
-        c.lat = parseFloat(data[0].lat); c.lng = parseFloat(data[0].lon);
-        save('clients');
-        if(state.tab==='today' && document.getElementById('territoryMapContainer')) refreshTerritoryMarkers();
-      }
-    }catch(e){ console.error('geocode failed for', c.name, e); }
-    await new Promise(r=>setTimeout(r, 1100));
-  }
-  __geocodingInProgress = false;
+function renderTerritoryBoard(){
+  const clientsWithAddr = DB.clients.filter(c=> c.address && c.address.trim());
+  if(!clientsWithAddr.length) return `<div class="muted" style="padding:30px 10px; text-align:center;">还没有客户地址 No client addresses yet</div>`;
+  const flags = clientsWithAddr.map(c=>{
+    const h = hashStr(c.id);
+    const x = 8 + (h % 84);
+    const y = 14 + (Math.floor(h/97) % 72);
+    return `<div style="position:absolute; left:${x}%; top:${y}%; transform:translate(-50%,-100%); text-align:center; cursor:pointer;" onclick="state.tab='clients'; state.clientId='${c.id}'; render();">
+      <div style="font-size:26px; filter:drop-shadow(0 2px 2px rgba(0,0,0,0.18));">🚩</div>
+      <div style="font-size:9px; font-weight:800; color:#6C8B72; background:#fff; padding:1px 6px; border-radius:8px; white-space:nowrap; margin-top:-2px; display:inline-block;">${c.name}</div>
+    </div>`;
+  }).join('');
+  return `<div style="position:relative; width:100%; height:280px; border-radius:16px; overflow:hidden; background:
+      radial-gradient(circle at 18% 28%, rgba(140,168,145,0.22) 0, transparent 30%),
+      radial-gradient(circle at 82% 18%, rgba(243,165,126,0.22) 0, transparent 28%),
+      radial-gradient(circle at 62% 78%, rgba(140,168,145,0.18) 0, transparent 32%),
+      radial-gradient(circle at 12% 82%, rgba(231,176,78,0.2) 0, transparent 26%),
+      radial-gradient(circle at 45% 50%, rgba(230,138,87,0.10) 0, transparent 40%),
+      var(--card-alt);">
+    ${flags}
+  </div>`;
 }
 
 function getUpcomingCatDates(daysAhead){
