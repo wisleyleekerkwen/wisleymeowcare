@@ -285,11 +285,23 @@ if(USE_FIREBASE){
     fbDB = firebase.firestore();
   }catch(e){ console.error('Firebase init failed', e); }
 }
+const FS_CHUNK_SIZE = 700000; // stay safely under Firestore's ~1MB per-document limit
 async function storageGet(key){
   if(fbUser){
-    const doc = await fbDB.collection('users').doc(fbUser.uid).collection('data').doc(key).get();
-    if(doc.exists) return {value: doc.data().value};
-    throw new Error('not found');
+    const docRef = fbDB.collection('users').doc(fbUser.uid).collection('data').doc(key);
+    const doc = await docRef.get();
+    if(!doc.exists) throw new Error('not found');
+    const data = doc.data();
+    if(data.chunks){
+      let full = '';
+      for(let i=0;i<data.chunks;i++){
+        const c = await docRef.collection('chunks').doc('c'+i).get();
+        full += (c.exists ? c.data().value : '');
+      }
+      return {value: full};
+    }
+    if(data.value===undefined) throw new Error('not found');
+    return {value: data.value};
   }
   if(HAS_CLAUDE_STORAGE) return window.storage.get(key, false);
   const raw = localStorage.getItem('wis_'+key);
@@ -298,7 +310,21 @@ async function storageGet(key){
 }
 async function storageSet(key, value){
   if(fbUser){
-    await fbDB.collection('users').doc(fbUser.uid).collection('data').doc(key).set({value});
+    const docRef = fbDB.collection('users').doc(fbUser.uid).collection('data').doc(key);
+    const prevSnap = await docRef.get();
+    const prevChunks = (prevSnap.exists && prevSnap.data().chunks) || 0;
+    if(value.length <= FS_CHUNK_SIZE){
+      await docRef.set({value, chunks:0});
+    } else {
+      const n = Math.ceil(value.length / FS_CHUNK_SIZE);
+      for(let i=0;i<n;i++){
+        const part = value.slice(i*FS_CHUNK_SIZE, (i+1)*FS_CHUNK_SIZE);
+        await docRef.collection('chunks').doc('c'+i).set({value: part});
+      }
+      await docRef.set({chunks:n});
+    }
+    const newChunks = value.length <= FS_CHUNK_SIZE ? 0 : Math.ceil(value.length / FS_CHUNK_SIZE);
+    for(let i=newChunks;i<prevChunks;i++){ docRef.collection('chunks').doc('c'+i).delete().catch(()=>{}); }
     return true;
   }
   if(HAS_CLAUDE_STORAGE) return window.storage.set(key, value, false);
@@ -547,13 +573,13 @@ function renderToday(){
   return `
   <h1>${tr('hello')}</h1>
   <div class="muted" style="margin-bottom:16px;">${niceDate(t)} · 一起把猫咪们照顾好</div>
-  <div class="row" style="gap:10px; margin-bottom:14px;">
-    <div class="card" style="background:#E9F1EA; border:none; text-align:center; padding:16px; flex:1;">
-      <div class="muted" style="font-size:12px;">累计总收入 Total Income</div>
+  <div class="row" style="gap:10px; margin-bottom:14px; align-items:stretch;">
+    <div class="card" style="background:#E9F1EA; border:none; text-align:center; padding:16px; flex:1; margin-bottom:0; display:flex; flex-direction:column;">
+      <div class="muted" style="font-size:12px; min-height:32px; display:flex; align-items:center; justify-content:center; line-height:1.3;">累计总收入 Total Income</div>
       <div style="font-size:24px; font-weight:800; color:var(--sage-dark);">${fmt(totalIncome)}</div>
     </div>
-    <div class="card" style="background:#E9F1EA; border:none; text-align:center; padding:16px; flex:1;">
-      <div class="muted" style="font-size:12px;">累计服务次数 Total Services</div>
+    <div class="card" style="background:#E9F1EA; border:none; text-align:center; padding:16px; flex:1; margin-bottom:0; display:flex; flex-direction:column;">
+      <div class="muted" style="font-size:12px; min-height:32px; display:flex; align-items:center; justify-content:center; line-height:1.3;">累计服务次数 Total Services</div>
       <div style="font-size:24px; font-weight:800; color:var(--sage-dark);">${totalServiceCount}</div>
     </div>
   </div>
@@ -1446,6 +1472,9 @@ function openDocForm(type, id){
   const clientOpts = DB.clients.map(c=>`<option value="${c.id}" ${doc&&doc.clientId===c.id?'selected':''}>${c.name}</option>`).join('');
   window.__visits = doc? JSON.parse(JSON.stringify(doc.visits||[])) : [];
   window.__docType = type; window.__docClientId = doc? doc.clientId : (type==='invoice'? (DB.clients[0]?DB.clients[0].id:'') : '');
+  const firstVisitDate = window.__visits.length? window.__visits.slice().sort((a,b)=> a.date<b.date?-1:1)[0].date : null;
+  const calBase = firstVisitDate? new Date(firstVisitDate+'T00:00:00') : new Date();
+  window.__docCalMonth = new Date(calBase.getFullYear(), calBase.getMonth(), 1);
   const cctv = (doc&&doc.cctv) || {needed:false, days:0, rate:DB.settings.cctvDailyRate};
   const route = (doc&&doc.route) || {origin:DB.settings.businessAddress||'', destination:'', avoidTolls:true, distanceKm:''};
   openModal(`
@@ -1457,24 +1486,13 @@ function openDocForm(type, id){
   <label class="flabel">客户姓名 / 称呼</label><input id="f_doc_leadname" value="${doc?doc.leadName||'':''}" placeholder="例如：Lacey">
   <label class="flabel">联系电话（可选）</label><input id="f_doc_leadphone" value="${doc?doc.leadPhone||'':''}" placeholder="012-3456789">
   `}
-  <div class="row" style="gap:10px;">
-    <div style="flex:1;"><label class="flabel">服务起始日</label><input type="date" id="f_doc_start" value="${doc?doc.startDate||'':todayStr()}"></div>
-    <div style="flex:1;"><label class="flabel">服务结束日</label><input type="date" id="f_doc_end" value="${doc?doc.endDate||'':todayStr()}"></div>
+  <input type="hidden" id="f_doc_start" value="${doc?doc.startDate||'':todayStr()}">
+  <input type="hidden" id="f_doc_end" value="${doc?doc.endDate||'':todayStr()}">
+  <input type="hidden" id="f_doc_timeslot" value="${doc?doc.timeSlot||'':''}">
+  <label class="flabel">服务日期 Service Dates（点击日历上的日期即可选择，可多选、不需要连续 tap any dates, no need to be consecutive）</label>
+  <div class="card" style="background:var(--card-alt); padding:14px; margin-bottom:14px;">
+    <div id="docCalWrap">${docCalendarHTML()}</div>
   </div>
-  <div class="row" style="gap:10px;">
-    <div style="flex:1;"><label class="flabel">时间段</label><input id="f_doc_timeslot" value="${doc?doc.timeSlot||'':'白天'}" placeholder="例如：白天"></div>
-    <div style="flex:1;"><label class="flabel">频率 Frequency</label>
-      <select id="f_doc_freq">
-        <option value="twice">一天两次 Twice a day</option>
-        <option value="1" selected>每一天 Every day</option>
-        <option value="2">每两天 Every 2 days</option>
-        <option value="3">每三天 Every 3 days</option>
-        <option value="4">每四天 Every 4 days</option>
-        <option value="5">每五天 Every 5 days</option>
-      </select>
-    </div>
-  </div>
-  <button class="btn btn-outline btn-block" style="margin-bottom:14px;" onclick="regenerateVisits()">🔄 按起止日期生成每日行程</button>
 
   ${type==='quote'? `
   <div class="divider"></div>
@@ -1495,7 +1513,7 @@ function openDocForm(type, id){
 
   <label class="flabel">用于计价的猫咪数量</label>
   <input type="number" id="f_doc_catcount" value="${doc&&doc.catCount? doc.catCount : (type==='invoice' && getClientById(window.__docClientId)? getClientById(window.__docClientId).pets.length||1 : 1)}" onchange="applySuggestedPriceToAll()">
-  <button class="btn btn-soft btn-block" style="margin-bottom:14px;" onclick="applySuggestedPriceToAll()">🧮 按${type==='quote'?'路线距离':'客户里程'}计算建议单价，套用到全部天数</button>
+  ${type==='invoice'? `<button class="btn btn-soft btn-block" style="margin-bottom:14px;" onclick="applySuggestedPriceToAll()">🧮 按客户里程计算建议单价，套用到全部天数</button>` : ''}
 
   <label class="flabel">${type==='quote'?'服务概要 Service Summary':'每日行程'}</label>
   ${type==='invoice'? `<div class="muted tap" style="text-align:right; margin:-6px 2px 6px; color:var(--sage-dark); font-weight:800; font-size:12px; cursor:pointer;" onclick="toggleTaskOptionsManage()">✏️ 管理服务细节清单 Manage list</div>
@@ -1533,6 +1551,59 @@ function openRouteInMaps(){
 function getClientById(id){ return DB.clients.find(x=>x.id===id); }
 function toggleCctvFields(){ document.getElementById('cctvFields').style.display = document.getElementById('f_doc_cctv_needed').checked? 'block':'none'; }
 function toggleHolidayFeeFields(){ document.getElementById('holidayFeeFields').style.display = document.getElementById('f_doc_holiday_needed').checked? 'block':'none'; }
+function docCalendarHTML(){
+  const m = window.__docCalMonth || new Date();
+  const year = m.getFullYear(), month = m.getMonth();
+  const selectedDates = new Set((window.__visits||[]).map(v=>v.date));
+  const first = new Date(year,month,1); const startDow = first.getDay();
+  const daysInMonth = new Date(year,month+1,0).getDate();
+  const cells = []; for(let i=0;i<startDow;i++) cells.push(null); for(let d=1; d<=daysInMonth; d++) cells.push(d);
+  const dowLabels = ['日','一','二','三','四','五','六'];
+  const todayS = todayStr();
+  const grid = cells.map(d=>{
+    if(!d) return `<div class="cal-cell empty"></div>`;
+    const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const cls = ['cal-cell']; if(selectedDates.has(ds)) cls.push('selected'); if(ds===todayS) cls.push('today');
+    return `<div class="${cls.join(' ')}" onclick="toggleDocCalDate('${ds}')">${d}</div>`;
+  }).join('');
+  const count = (window.__visits||[]).length;
+  return `
+  <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:10px;">
+    <button class="btn btn-soft btn-sm" onclick="shiftDocCalMonth(-1)">‹</button>
+    <div style="font-weight:800;">${year}年${month+1}月</div>
+    <button class="btn btn-soft btn-sm" onclick="shiftDocCalMonth(1)">›</button>
+  </div>
+  <div class="cal-grid">
+    ${dowLabels.map(l=>`<div class="cal-dow">${l}</div>`).join('')}
+    ${grid}
+  </div>
+  <div class="muted" style="margin-top:8px; text-align:center; font-weight:700;">已选 ${count} 天 Selected</div>
+  `;
+}
+function shiftDocCalMonth(delta){
+  const m = window.__docCalMonth || new Date();
+  window.__docCalMonth = new Date(m.getFullYear(), m.getMonth()+delta, 1);
+  document.getElementById('docCalWrap').innerHTML = docCalendarHTML();
+}
+function toggleDocCalDate(ds){
+  if(!window.__visits) window.__visits=[];
+  const idx = window.__visits.findIndex(v=>v.date===ds);
+  if(idx>=0){ window.__visits.splice(idx,1); }
+  else {
+    window.__visits.push({id:uid(), date:ds, timeSlot:'', tasks: DB.settings.taskOptions.slice(), extraNotes:'', price:0});
+    window.__visits.sort((a,b)=> a.date<b.date?-1:1);
+  }
+  updateDocDateRangeFromVisits();
+  document.getElementById('docCalWrap').innerHTML = docCalendarHTML();
+  renderVisitRows();
+}
+function updateDocDateRangeFromVisits(){
+  const dates = (window.__visits||[]).map(v=>v.date).filter(Boolean).sort();
+  const startEl = document.getElementById('f_doc_start'), endEl = document.getElementById('f_doc_end');
+  if(dates.length){ if(startEl) startEl.value = dates[0]; if(endEl) endEl.value = dates[dates.length-1]; }
+  const cctvDaysInput = document.getElementById('f_doc_cctv_days');
+  if(cctvDaysInput) cctvDaysInput.value = dates.length;
+}
 function regenerateVisits(){
   const start = val('f_doc_start'), end = val('f_doc_end');
   if(!start||!end||end<start){ toast('请先正确选择起止日期'); return; }
@@ -1653,7 +1724,6 @@ function renderVisitRows(){
     const price = count? (window.__visits[0].price||0) : 0;
     wrap.innerHTML = `
       <div class="visitrow">
-        <div class="muted" style="margin-bottom:8px;">共 ${count} 天 Total ${count} days（报价阶段不需要按天挑选服务细节 no need to pick daily tasks yet）</div>
         <label class="flabel">统一单价 Price per visit (RM)</label>
         <input type="number" id="f_quote_unit_price" value="${price}" oninput="window.__visits.forEach(v=>v.price=Number(this.value)||0); document.getElementById('quotePriceTotal').textContent=fmt((Number(this.value)||0)*window.__visits.length);">
         <div class="muted" style="margin-top:8px;">预计总额 Estimated Total: <span id="quotePriceTotal" style="font-weight:800; color:var(--sage-dark);">${fmt(price*count)}</span></div>
@@ -2384,6 +2454,7 @@ function genPDF(type, id, mode){
       </div>
       ` : ''}
 
+      ${type==='invoice'? `
       <div style="background:#F4ECDF; border-radius:14px; padding:14px 18px; margin-bottom:16px;">
         <div style="font-weight:800; margin-bottom:6px;">Customer Info</div>
         <table style="width:100%; font-size:13px; border-collapse:collapse;">
@@ -2394,10 +2465,15 @@ function genPDF(type, id, mode){
           <tr><td style="color:#9C8F7E; padding:2px 0;">Time Slot</td><td>${doc.timeSlot||'—'}</td></tr>
         </table>
       </div>
-
       ${careAnswers}
       <div style="font-weight:800; margin-bottom:8px;">Cat(s) Info</div>
       ${petBlocks}
+      ` : `
+      <div style="background:#fff; border:1px solid #EDE2D0; border-radius:14px; padding:12px 18px; margin-bottom:16px; font-size:13px; display:flex; justify-content:space-between;">
+        <span style="color:#9C8F7E;">${isEN?'Service Dates':'服务日期 Service Dates'}</span>
+        <span style="font-weight:700;">${doc.startDate||'—'} ~ ${doc.endDate||'—'}（${totalDays} ${isEN?'days':'天/days'}）</span>
+      </div>
+      `}
 
       ${type==='invoice'? `
       <table style="width:100%; border-collapse:collapse; font-size:13px; margin-top:6px;">
@@ -2417,28 +2493,14 @@ function genPDF(type, id, mode){
         }).map(t=>`✓ ${isEN? enOnly(t) : t}`).join('<br>')}</div>
         <div style="font-size:12px; color:#8CA891; font-weight:700; margin-top:10px;">${isEN? '✨ Customizable services available' : '✨ 可定制服务 Customizable services available'}</div>
       </div>
-      <div style="background:#fff; border:1px solid #EDE2D0; border-radius:14px; padding:14px 18px; margin-bottom:12px; font-size:13px;">
-        <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>${isEN?'Service Dates':'服务日期 Service Dates'}</span><span style="font-weight:700;">${doc.startDate||'—'} ~ ${doc.endDate||'—'}</span></div>
-        <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>${isEN?'Total Days':'共 Total Days'}</span><span style="font-weight:700;">${totalDays} ${isEN?'days':'天/days'}</span></div>
-        <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>${isEN?'Per Visit':'单次价格 Per Visit'}</span><span style="font-weight:700;">${fmt((doc.visits&&doc.visits[0])?doc.visits[0].price:0)}</span></div>
-      </div>
-      <div style="background:#fff; border:1px solid #EDE2D0; border-radius:14px; padding:14px 18px; margin-bottom:12px; font-size:12px; color:#6b5f4f; line-height:1.7;">
-        <div style="font-weight:800; color:#3E362C; margin-bottom:4px;">${isEN? 'How pricing is calculated' : '收费计算方式 How pricing is calculated'}</div>
-        ${isEN? `
-        <div>Within ${DB.settings.baseKm}km round-trip, base fee is ${fmt(DB.settings.baseRate)} (up to ${DB.settings.baseCats} cats included).</div>
-        <div>Beyond ${DB.settings.baseKm}km, +${fmt(DB.settings.extraKmRate)} for every extra ${DB.settings.extraKmBlock}km.</div>
-        <div>More than ${DB.settings.baseCats} cats: +${fmt(DB.settings.extraCatRate)} per additional cat.</div>
-        ` : `
-        <div>往返 ${DB.settings.baseKm}km 内，基本服务费是 ${fmt(DB.settings.baseRate)}（含最多 ${DB.settings.baseCats} 只猫）。</div>
-        <div>超过 ${DB.settings.baseKm}km，每多 ${DB.settings.extraKmBlock}km 加收 ${fmt(DB.settings.extraKmRate)}。</div>
-        <div>猫咪超过 ${DB.settings.baseCats} 只，每多一只加收 ${fmt(DB.settings.extraCatRate)}。</div>
-        `}
-      </div>
+      ${!km? `<div style="background:#fff; border:1px solid #EDE2D0; border-radius:14px; padding:14px 18px; margin-bottom:12px; font-size:13px;">
+        <div style="display:flex; justify-content:space-between; padding:3px 0; font-weight:700;"><span>${isEN?'Per Visit':'单次价格 Per Visit'}</span><span>${fmt((doc.visits&&doc.visits[0])?doc.visits[0].price:0)}</span></div>
+      </div>` : ''}
       ${cctvOn? `<div style="font-size:12.5px; color:#6b5f4f; margin-bottom:6px;">+ ${isEN?'CCTV Rental':'CCTV 租用 CCTV Rental'} (${doc.cctv.days} days × ${fmt(doc.cctv.rate)}) = ${fmt(cctvTotal)}</div>`:''}
       ${holidayOn? `<div style="font-size:12.5px; color:#6b5f4f; margin-bottom:6px;">+ ${isEN?'Holiday Fee':'节日费 Holiday Fee'} = ${fmt(holidayTotal)}</div>`:''}
       `}
 
-      <div style="margin-top:14px; font-size:12px; color:#6b5f4f; white-space:pre-line;">${(DB.settings.serviceNotes||'').split('\n').map(l=>'** '+l).join('\n')}</div>
+      ${type==='invoice'? `<div style="margin-top:14px; font-size:12px; color:#6b5f4f; white-space:pre-line;">${(DB.settings.serviceNotes||'').split('\n').map(l=>'** '+l).join('\n')}</div>` : ''}
 
       ${type==='invoice'? `
       <div style="margin-top:14px; background:#F4ECDF; border-radius:14px; padding:14px 18px; max-width:320px; margin-left:auto;">
@@ -2455,7 +2517,7 @@ function genPDF(type, id, mode){
       ${qrBlocks}
     </div>
   </div>
-  <div style="margin-top:18px; text-align:center; color:#c9bda3; font-size:12px;">🐾 感谢您的信任，我们会好好照顾您的猫咪 Thank you for trusting us with your cats 🐾</div>
+  ${type==='invoice'? `<div style="margin-top:18px; text-align:center; color:#c9bda3; font-size:12px;">🐾 感谢您的信任，我们会好好照顾您的猫咪 Thank you for trusting us with your cats 🐾</div>` : ''}
   `;
   document.body.appendChild(wrap);
 
