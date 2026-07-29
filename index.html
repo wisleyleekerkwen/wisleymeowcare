@@ -118,6 +118,11 @@
   .subchip{flex:none; padding:8px 14px; border-radius:99px; background:var(--card); border:1px solid var(--line); font-weight:800; font-size:13px; color:var(--ink-light); cursor:pointer; white-space:nowrap;}
   .subchip.active{background:var(--sage); color:#fff; border-color:var(--sage);}
   .statgrid{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .catgrid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px;}
+  .cattile{position:relative; aspect-ratio:1; border-radius:16px; overflow:hidden; background:var(--card-alt); cursor:pointer;}
+  .cattile img{width:100%; height:100%; object-fit:cover; display:block;}
+  .cattile-ph{width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:28px; opacity:0.4;}
+  .cattile-label{position:absolute; left:0; right:0; bottom:0; padding:5px 6px 4px; font-size:11.5px; font-weight:800; color:#fff; text-align:center; background:linear-gradient(transparent, rgba(0,0,0,0.55)); text-shadow:0 1px 2px rgba(0,0,0,0.4);}
   .statcard{background:var(--card); border:1px solid var(--line); border-radius:18px; padding:14px;}
   .statcard .v{font-size:20px; font-weight:800; font-family:'Fredoka',sans-serif;}
   .statcard .l{font-size:12px; color:var(--ink-light); margin-top:2px;}
@@ -169,7 +174,9 @@
   <div id="bottomnav"><div id="navwrap">
     <button class="tabbtn" data-tab="today" onclick="setTab('today')"><span class="ic">🏠</span><span class="label" id="navlbl_today">今天</span></button>
     <button class="tabbtn" data-tab="clients" onclick="setTab('clients')"><span class="ic">🐾</span><span class="label" id="navlbl_clients">客户</span></button>
+    <button class="tabbtn" data-tab="cats" onclick="setTab('cats')"><span class="ic">🐱</span><span class="label" id="navlbl_cats">猫咪</span></button>
     <button class="tabbtn" data-tab="money" onclick="setTab('money')"><span class="ic">💰</span><span class="label" id="navlbl_money">账目</span></button>
+    <button class="tabbtn" data-tab="reports" onclick="setTab('reports')"><span class="ic">📊</span><span class="label" id="navlbl_reports">报表</span></button>
   </div></div>
 </div>
 <div id="modalRoot"><div id="modalOverlay" onclick="closeModal()"></div><div id="modalCard"></div><button id="modalCloseFab" onclick="closeModal()">✕</button></div>
@@ -326,7 +333,7 @@ const I18N = {
     giftCard:'🎁 可领定制猫咪钥匙扣', servedTimes:'已服务',
     pending:'待处理', prepared:'已准备', sent:'✓ 已送出',
     clientsTitle:'客户', searchClient:'搜索客户姓名', noClients:'还没有客户，点击右下角 ＋ 添加',
-    moneyTitle:'账目', invoices:'账单', quotes:'报价', expenses:'开销', analytics:'客户分析', reports:'报表',
+    moneyTitle:'账目', invoices:'账单', quotes:'报价', expenses:'开销', analytics:'客户分析', reports:'报表', cats:'猫咪',
     save:'保存', cancel:'取消', delete:'删除', edit:'编辑', add:'＋ 添加', confirm:'确认',
     settings:'设置',
   },
@@ -336,7 +343,7 @@ const I18N = {
     giftCard:'🎁 Keychain Gift Eligible', servedTimes:'Served',
     pending:'Pending', prepared:'Prepared', sent:'✓ Sent',
     clientsTitle:'Clients', searchClient:'Search client name', noClients:'No clients yet — tap ＋ to add',
-    moneyTitle:'Money', invoices:'Invoice', quotes:'Quote', expenses:'Expense', analytics:'Analytics', reports:'Reports',
+    moneyTitle:'Money', invoices:'Invoice', quotes:'Quote', expenses:'Expense', analytics:'Analytics', reports:'Reports', cats:'Cats',
     save:'Save', cancel:'Cancel', delete:'Delete', edit:'Edit', add:'＋ Add', confirm:'Confirm',
     settings:'Settings',
   }
@@ -396,14 +403,16 @@ function render(){
   const activeSelEnd = (activeEl && typeof activeEl.selectionEnd === 'number') ? activeEl.selectionEnd : null;
 
   document.querySelectorAll('.tabbtn').forEach(b=>b.classList.toggle('active', b.dataset.tab===state.tab));
-  const navlbl = {today:'navlbl_today', clients:'navlbl_clients', money:'navlbl_money'};
+  const navlbl = {today:'navlbl_today', clients:'navlbl_clients', cats:'navlbl_cats', money:'navlbl_money', reports:'navlbl_reports'};
   Object.keys(navlbl).forEach(k=>{ const el=document.getElementById(navlbl[k]); if(el) el.textContent = tr(k); });
   const fab = document.getElementById('fabBtn');
-  fab.style.display = ((state.tab==='clients'&&state.clientId) || state.tab==='today') ? 'none' : 'flex';
+  fab.style.display = ((state.tab==='clients'&&state.clientId) || state.tab==='today' || state.tab==='reports' || state.tab==='cats') ? 'none' : 'flex';
   const el = document.getElementById('screen');
   if(state.tab==='today') el.innerHTML = renderToday();
   else if(state.tab==='clients') el.innerHTML = state.clientId ? renderClientDetail(state.clientId) : renderClientList();
+  else if(state.tab==='cats') el.innerHTML = `<h1>${tr('cats')}</h1>` + renderCatGallery();
   else if(state.tab==='money') el.innerHTML = renderMoney();
+  else if(state.tab==='reports') el.innerHTML = `<h1>${tr('reports')}</h1>` + renderReports();
 
   if(activeId){
     const restored = document.getElementById(activeId);
@@ -793,13 +802,11 @@ function deletePet(clientId, petId){
 
 /* ---------------- MONEY ---------------- */
 function renderMoney(){
-  const tabs = [['quotes',tr('quotes')],['invoices',tr('invoices')],['expenses',tr('expenses')],['reports',tr('reports')],['analytics',tr('analytics')]];
+  const tabs = [['quotes',tr('quotes')],['invoices',tr('invoices')],['expenses',tr('expenses')]];
   let body='';
   if(state.moneyTab==='invoices') body = state.invId? renderDocDetail('invoice',state.invId) : renderDocList('invoice');
   else if(state.moneyTab==='quotes') body = state.quoteId? renderDocDetail('quote',state.quoteId) : renderDocList('quote');
   else if(state.moneyTab==='expenses') body = renderExpenses();
-  else if(state.moneyTab==='reports') body = renderReports();
-  else if(state.moneyTab==='analytics') body = renderAnalytics();
   return `
   <h1>${tr('moneyTitle')}</h1>
   <div class="subnav">${tabs.map(([k,l])=>`<div class="subchip ${state.moneyTab===k?'active':''}" onclick="state.moneyTab='${k}'; state.invId=null; state.quoteId=null; render();">${l}</div>`).join('')}</div>
@@ -893,7 +900,7 @@ function openDocForm(type, id){
   window.__visits = doc? JSON.parse(JSON.stringify(doc.visits||[])) : [];
   window.__docType = type; window.__docClientId = doc? doc.clientId : (type==='invoice'? (DB.clients[0]?DB.clients[0].id:'') : '');
   const cctv = (doc&&doc.cctv) || {needed:false, days:0, rate:DB.settings.cctvDailyRate};
-  const route = (doc&&doc.route) || {origin:DB.settings.businessAddress||'', destination:'', avoidTolls:true, distanceKm:'', durationMin:''};
+  const route = (doc&&doc.route) || {origin:DB.settings.businessAddress||'', destination:'', avoidTolls:true, distanceKm:''};
   openModal(`
   <div class="modalhead"><h2>${doc? (type==='invoice'?'编辑账单':'编辑报价') : (type==='invoice'?'新建账单':'新建报价')}</h2><button class="closex" onclick="closeModal()">✕</button></div>
   ${type==='invoice'? `
@@ -925,19 +932,22 @@ function openDocForm(type, id){
   ${type==='quote'? `
   <div class="divider"></div>
   <h3>🗺️ 路线距离（用于计价）</h3>
-  <label class="flabel">出发地点</label><input id="f_doc_origin" value="${route.origin}" placeholder="你的出发地址">
+  <label class="flabel">出发地点</label>
+  <select id="f_doc_origin_sel" onchange="onOriginSelectChange()">
+    <option value="MRT Surian" ${route.origin==='MRT Surian'?'selected':''}>MRT Surian</option>
+    <option value="USJ 1 Subang Jaya" ${route.origin==='USJ 1 Subang Jaya'?'selected':''}>USJ 1, Subang Jaya</option>
+    <option value="custom" ${!['MRT Surian','USJ 1 Subang Jaya'].includes(route.origin)?'selected':''}>自己打字 Type manually</option>
+  </select>
+  <input id="f_doc_origin" value="${route.origin}" placeholder="你的出发地址" style="display:${['MRT Surian','USJ 1 Subang Jaya'].includes(route.origin)?'none':'block'}; margin-top:-6px; margin-bottom:14px;">
   <label class="flabel">到达地点（客户地址）</label><input id="f_doc_dest" value="${route.destination}" placeholder="客户地址">
   <div class="checkline"><input type="checkbox" id="f_doc_avoidtolls" ${route.avoidTolls!==false?'checked':''}> 避开收费站</div>
   <button class="btn btn-soft btn-block" style="margin-bottom:10px;" onclick="openRouteInMaps()">在 Google 地图查看路线 ↗</button>
-  <div class="muted" style="margin-bottom:8px; font-size:12px;">点开地图看到距离和时间后，填在下面两格里：</div>
-  <div class="row" style="gap:10px;">
-    <div style="flex:1;"><label class="flabel">距离 (km)</label><input type="number" id="f_doc_distance" value="${route.distanceKm||''}" placeholder="例如 19"></div>
-    <div style="flex:1;"><label class="flabel">预计车程 (分钟)</label><input type="number" id="f_doc_duration" value="${route.durationMin||''}" placeholder="例如 25"></div>
-  </div>
+  <div class="muted" style="margin-bottom:8px; font-size:12px;">点开地图看到距离后，填在下面（填好会自动算价格）：</div>
+  <label class="flabel">距离 (km)</label><input type="number" id="f_doc_distance" value="${route.distanceKm||''}" placeholder="例如 19" onchange="applySuggestedPriceToAll()">
   ` : ''}
 
   <label class="flabel">用于计价的猫咪数量</label>
-  <input type="number" id="f_doc_catcount" value="${doc&&doc.catCount? doc.catCount : (type==='invoice' && getClientById(window.__docClientId)? getClientById(window.__docClientId).pets.length||1 : 1)}">
+  <input type="number" id="f_doc_catcount" value="${doc&&doc.catCount? doc.catCount : (type==='invoice' && getClientById(window.__docClientId)? getClientById(window.__docClientId).pets.length||1 : 1)}" onchange="applySuggestedPriceToAll()">
   <button class="btn btn-soft btn-block" style="margin-bottom:14px;" onclick="applySuggestedPriceToAll()">🧮 按${type==='quote'?'路线距离':'客户里程'}计算建议单价，套用到全部天数</button>
 
   <label class="flabel">每日行程</label>
@@ -1080,6 +1090,12 @@ function renderVisitRows(){
     </div>
   `).join('');
 }
+function onOriginSelectChange(){
+  const sel = val('f_doc_origin_sel');
+  const inp = document.getElementById('f_doc_origin');
+  if(sel==='custom'){ inp.style.display='block'; inp.value=''; inp.focus(); }
+  else { inp.style.display='none'; inp.value=sel; }
+}
 function applySuggestedPriceToAll(){
   const type = window.__docType;
   let km;
@@ -1111,7 +1127,7 @@ function saveDoc(type, id){
     data = {
       leadName, leadPhone: val('f_doc_leadphone').trim(),
       startDate: val('f_doc_start'), endDate: val('f_doc_end'), timeSlot: val('f_doc_timeslot'), catCount: Number(val('f_doc_catcount'))||1, visits,
-      route: { origin: val('f_doc_origin').trim(), destination: val('f_doc_dest').trim(), avoidTolls: document.getElementById('f_doc_avoidtolls').checked, distanceKm: Number(val('f_doc_distance'))||0, durationMin: Number(val('f_doc_duration'))||0 },
+      route: { origin: val('f_doc_origin').trim(), destination: val('f_doc_dest').trim(), avoidTolls: document.getElementById('f_doc_avoidtolls').checked, distanceKm: Number(val('f_doc_distance'))||0 },
     };
   }
   Object.assign(data, {
@@ -1166,7 +1182,6 @@ function renderDocDetail(type, id){
     <div class="muted">${doc.route.origin||'—'} → ${doc.route.destination||'—'}</div>
     <div class="row" style="margin-top:8px;">
       <span class="pill">${doc.route.distanceKm||'—'} km</span>
-      <span class="pill">${doc.route.durationMin? doc.route.durationMin+' 分钟' : '—'}</span>
       <span class="pill ${doc.route.avoidTolls?'green':'gray'}">${doc.route.avoidTolls?'✓':'✗'} 避开收费站</span>
     </div>
   </div>` : ''}
@@ -1409,6 +1424,49 @@ function deleteQuickEditVisit(invId, visitId){
   });
 }
 function renderReports(){
+  const section = state.reportSection || 'finance';
+  const chips = [['finance','📈 财务 Finance'],['analytics','📊 客户分析 Client Analytics']];
+  const nav = `<div class="row" style="gap:6px; margin-bottom:14px; overflow-x:auto; flex-wrap:nowrap;">
+    ${chips.map(([k,l])=>`<div class="subchip ${section===k?'active':''}" style="flex:none; white-space:nowrap;" onclick="state.reportSection='${k}'; render();">${l}</div>`).join('')}
+  </div>`;
+  let body = '';
+  if(section==='finance') body = renderReportsFinance();
+  else if(section==='analytics') body = renderAnalytics();
+  return nav + body;
+}
+function renderCatGallery(){
+  const cats = [];
+  DB.clients.forEach(c=>{
+    (c.pets||[]).forEach(p=>{
+      if(p.name) cats.push({name:p.name, photo:p.photo, client:c.name, clientId:c.id, petId:p.id});
+    });
+  });
+  if(!cats.length) return `<div class="card empty"><span class="emoji">🐱</span>还没有宠物照片 No cat photos yet</div>`;
+  return `<div class="catgrid">
+    ${cats.map(p=>`
+      <div class="cattile" onclick="openCatDetail('${p.clientId}','${p.petId}')">
+        ${p.photo? `<img src="${p.photo}">` : `<div class="cattile-ph">🐾</div>`}
+        <div class="cattile-label">${p.name}</div>
+      </div>`).join('')}
+  </div>`;
+}
+function openCatDetail(clientId, petId){
+  const c = DB.clients.find(x=>x.id===clientId); if(!c) return;
+  const p = (c.pets||[]).find(x=>x.id===petId); if(!p) return;
+  openModal(`
+  <div class="modalhead"><h2>${p.name}</h2><button class="closex" onclick="closeModal()">✕</button></div>
+  ${p.photo? `<img src="${p.photo}" style="width:100%; aspect-ratio:1; object-fit:cover; border-radius:16px; margin-bottom:14px;">` : ''}
+  <div class="card">
+    <div class="row" style="padding:4px 0;"><span class="muted">主人 Owner</span><span style="font-weight:800;">${c.name}</span></div>
+    <div class="row" style="padding:4px 0;"><span class="muted">性别 Gender</span><span style="font-weight:800;">${p.gender||'未知'}</span></div>
+    <div class="row" style="padding:4px 0;"><span class="muted">生病/怀孕 Sick/Pregnant</span><span style="font-weight:800;">${p.sickPregnant||'否'}</span></div>
+    ${p.medical? `<div style="padding:8px 0 0;"><div class="muted" style="margin-bottom:2px;">🩺 病史 Medical</div>${p.medical}</div>`:''}
+    ${p.notes? `<div style="padding:8px 0 0;"><div class="muted" style="margin-bottom:2px;">📝 注意事项 Notes</div>${p.notes}</div>`:''}
+  </div>
+  <button class="btn btn-soft btn-block" style="margin-top:14px;" onclick="closeModal(); state.tab='clients'; state.clientId='${c.id}'; render();">前往客户资料 Go to owner's profile</button>
+  `);
+}
+function renderReportsFinance(){
   const basis = state.reportBasis || 'service';
   const monthMap = monthlyFinancials(basis);
   const t = todayStr(); const curMonth = t.slice(0,7);
