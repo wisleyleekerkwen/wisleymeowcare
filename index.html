@@ -288,14 +288,14 @@ if(USE_FIREBASE){
 const FS_CHUNK_SIZE = 700000; // stay safely under Firestore's ~1MB per-document limit
 async function storageGet(key){
   if(fbUser){
-    const docRef = fbDB.collection('users').doc(fbUser.uid).collection('data').doc(key);
-    const doc = await docRef.get();
+    const dataCol = fbDB.collection('users').doc(fbUser.uid).collection('data');
+    const doc = await dataCol.doc(key).get();
     if(!doc.exists) throw new Error('not found');
     const data = doc.data();
     if(data.chunks){
       let full = '';
       for(let i=0;i<data.chunks;i++){
-        const c = await docRef.collection('chunks').doc('c'+i).get();
+        const c = await dataCol.doc(key+'__c'+i).get();
         full += (c.exists ? c.data().value : '');
       }
       return {value: full};
@@ -310,7 +310,8 @@ async function storageGet(key){
 }
 async function storageSet(key, value){
   if(fbUser){
-    const docRef = fbDB.collection('users').doc(fbUser.uid).collection('data').doc(key);
+    const dataCol = fbDB.collection('users').doc(fbUser.uid).collection('data');
+    const docRef = dataCol.doc(key);
     const prevSnap = await docRef.get();
     const prevChunks = (prevSnap.exists && prevSnap.data().chunks) || 0;
     if(value.length <= FS_CHUNK_SIZE){
@@ -319,12 +320,12 @@ async function storageSet(key, value){
       const n = Math.ceil(value.length / FS_CHUNK_SIZE);
       for(let i=0;i<n;i++){
         const part = value.slice(i*FS_CHUNK_SIZE, (i+1)*FS_CHUNK_SIZE);
-        await docRef.collection('chunks').doc('c'+i).set({value: part});
+        await dataCol.doc(key+'__c'+i).set({value: part});
       }
       await docRef.set({chunks:n});
     }
     const newChunks = value.length <= FS_CHUNK_SIZE ? 0 : Math.ceil(value.length / FS_CHUNK_SIZE);
-    for(let i=newChunks;i<prevChunks;i++){ docRef.collection('chunks').doc('c'+i).delete().catch(()=>{}); }
+    for(let i=newChunks;i<prevChunks;i++){ dataCol.doc(key+'__c'+i).delete().catch(()=>{}); }
     return true;
   }
   if(HAS_CLAUDE_STORAGE) return window.storage.set(key, value, false);
@@ -352,11 +353,12 @@ async function saveWithRetry(key, retriesLeft){
   try{
     await storageSet(key, JSON.stringify(DB[key]));
   }catch(e){
+    console.error('Save failed for key:', key, e);
     if(retriesLeft>0){
       await new Promise(r=>setTimeout(r, 400));
       return saveWithRetry(key, retriesLeft-1);
     }
-    toast('保存失败，请检查网络 Save failed, check connection');
+    toast('保存失败 Save failed: ' + (e && e.message ? e.message : '请检查网络'));
   }
 }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
@@ -1387,11 +1389,20 @@ function renderMoney(){
 }
 
 /* ---- shared invoice/quote model ---- */
-function docTotal(doc){
+function docSubtotal(doc){
   const visitsTotal = (doc.visits||[]).reduce((s,v)=>s+(Number(v.price)||0),0);
   const cctvTotal = (doc.cctv && doc.cctv.needed) ? (Number(doc.cctv.days)||0)*(Number(doc.cctv.rate)||0) : 0;
   const holidayTotal = (doc.holidayFee && doc.holidayFee.needed) ? (Number(doc.holidayFee.amount)||0) : 0;
   return visitsTotal + cctvTotal + holidayTotal;
+}
+function discountAmt(doc){
+  if(!doc.discount || !doc.discount.needed) return 0;
+  const sub = docSubtotal(doc);
+  const raw = doc.discount.type==='percent' ? sub*(Number(doc.discount.amount)||0)/100 : (Number(doc.discount.amount)||0);
+  return Math.max(0, Math.min(raw, sub));
+}
+function docTotal(doc){
+  return docSubtotal(doc) - discountAmt(doc);
 }
 function depositAmt(doc){ return docTotal(doc) * (Number(doc.depositPercent)||50) / 100; }
 function invStatus(inv){
@@ -1535,6 +1546,19 @@ function openDocForm(type, id){
     <label class="flabel">节日费金额 Amount</label><input type="number" id="f_doc_holiday_amt" value="${doc&&doc.holidayFee?doc.holidayFee.amount||'':''}" placeholder="例如 20">
   </div>
 
+  <div class="checkline"><input type="checkbox" id="f_doc_discount_needed" ${doc&&doc.discount&&doc.discount.needed?'checked':''} onchange="toggleDiscountFields()"> 🏷️ 给优惠 Apply Discount</div>
+  <div id="discountFields" style="display:${doc&&doc.discount&&doc.discount.needed?'block':'none'}; margin-bottom:14px;">
+    <div class="row" style="gap:10px;">
+      <div style="flex:1;"><label class="flabel">类型 Type</label>
+        <select id="f_doc_discount_type">
+          <option value="fixed" ${!doc||!doc.discount||doc.discount.type!=='percent'?'selected':''}>固定金额 Fixed (RM)</option>
+          <option value="percent" ${doc&&doc.discount&&doc.discount.type==='percent'?'selected':''}>百分比 Percentage (%)</option>
+        </select>
+      </div>
+      <div style="flex:1;"><label class="flabel">数值 Amount</label><input type="number" id="f_doc_discount_amt" value="${doc&&doc.discount?doc.discount.amount||'':''}" placeholder="例如 10"></div>
+    </div>
+  </div>
+
   <label class="flabel">定金比例 (%)</label><input type="number" id="f_doc_deposit" value="${doc?doc.depositPercent!=null?doc.depositPercent:DB.settings.depositPercent:DB.settings.depositPercent}">
   <label class="flabel">备注</label><textarea id="f_doc_notes" placeholder="给客户的附加备注">${doc?doc.notes||'':''}</textarea>
   <button class="btn btn-primary btn-block" onclick="saveDoc('${type}','${id||''}')">保存${type==='invoice'?'账单':'报价'}</button>
@@ -1551,6 +1575,7 @@ function openRouteInMaps(){
 function getClientById(id){ return DB.clients.find(x=>x.id===id); }
 function toggleCctvFields(){ document.getElementById('cctvFields').style.display = document.getElementById('f_doc_cctv_needed').checked? 'block':'none'; }
 function toggleHolidayFeeFields(){ document.getElementById('holidayFeeFields').style.display = document.getElementById('f_doc_holiday_needed').checked? 'block':'none'; }
+function toggleDiscountFields(){ document.getElementById('discountFields').style.display = document.getElementById('f_doc_discount_needed').checked? 'block':'none'; }
 function docCalendarHTML(){
   const m = window.__docCalMonth || new Date();
   const year = m.getFullYear(), month = m.getMonth();
@@ -1790,6 +1815,7 @@ function saveDoc(type, id){
   Object.assign(data, {
     cctv: { needed: document.getElementById('f_doc_cctv_needed').checked, days: Number(val('f_doc_cctv_days'))||0, rate: Number(val('f_doc_cctv_rate'))||DB.settings.cctvDailyRate },
     holidayFee: { needed: document.getElementById('f_doc_holiday_needed').checked, amount: Number(val('f_doc_holiday_amt'))||0 },
+    discount: { needed: document.getElementById('f_doc_discount_needed').checked, type: val('f_doc_discount_type')||'fixed', amount: Number(val('f_doc_discount_amt'))||0 },
     depositPercent: Number(val('f_doc_deposit'))||50,
     notes: val('f_doc_notes').trim(),
   });
@@ -1811,7 +1837,10 @@ function renderDocDetail(type, id){
   const visitsTotal = (doc.visits||[]).reduce((s,v)=>s+(Number(v.price)||0),0);
   const cctvTotal = (doc.cctv&&doc.cctv.needed)? (Number(doc.cctv.days)||0)*(Number(doc.cctv.rate)||0) : 0;
   const holidayTotal = (doc.holidayFee&&doc.holidayFee.needed)? (Number(doc.holidayFee.amount)||0) : 0;
-  const total = visitsTotal+cctvTotal+holidayTotal;
+  const subtotal = visitsTotal+cctvTotal+holidayTotal;
+  const discountOn = doc.discount && doc.discount.needed;
+  const discountTotal = discountAmt(doc);
+  const total = docTotal(doc);
   const dep = depositAmt(doc);
   const paid = type==='invoice'? (doc.payments||[]).reduce((s,p)=>s+Number(p.amount),0) : 0;
   const backTo = type==='invoice'? `state.invId=null;` : `state.quoteId=null;`;
@@ -1830,6 +1859,8 @@ function renderDocDetail(type, id){
     ${doc.holidayFee&&doc.holidayFee.needed? `<tr><td colspan="3">节日费 Holiday Fee</td><td>${fmt(holidayTotal)}</td></tr>`:''}
     </table>
     <div class="divider"></div>
+    ${discountOn? `<div class="totalline"><span>小计</span><span>${fmt(subtotal)}</span></div>
+    <div class="totalline" style="color:var(--danger);"><span>🏷️ 折扣 Discount ${doc.discount.type==='percent'?`(${doc.discount.amount}%)`:''}</span><span>-${fmt(discountTotal)}</span></div>` : ''}
     <div class="totalline big"><span>总额</span><span>${fmt(total)}</span></div>
     <div class="totalline" style="color:var(--peach-dark);"><span>定金 (${doc.depositPercent||50}%)</span><span>${fmt(dep)}</span></div>
     <div class="totalline"><span>尾款</span><span>${fmt(total-dep)}</span></div>
@@ -2358,12 +2389,16 @@ function genPDF(type, id, mode){
   const cctvTotal = cctvOn? (Number(doc.cctv.days)||0)*(Number(doc.cctv.rate)||0) : 0;
   const holidayOn = doc.holidayFee && doc.holidayFee.needed;
   const holidayTotal = holidayOn? (Number(doc.holidayFee.amount)||0) : 0;
-  const total = visitsTotal + cctvTotal + holidayTotal;
+  const subtotal = visitsTotal + cctvTotal + holidayTotal;
+  const discountOn = doc.discount && doc.discount.needed;
+  const discountTotal = discountAmt(doc);
+  const total = docTotal(doc);
   const dep = depositAmt(doc);
   const totalDays = daysBetweenInclusive(doc.startDate, doc.endDate);
   const catCount = doc.catCount || pets.length || 1;
   const km = c.km || (doc.route && doc.route.distanceKm) || 0;
   const est = km? suggestedPrice(km, catCount) : null;
+  const unitPrice = (doc.visits&&doc.visits[0])? (Number(doc.visits[0].price)||0) : 0;
 
   const visitRows = (doc.visits||[]).map(v=>`
     <tr>
@@ -2493,11 +2528,14 @@ function genPDF(type, id, mode){
         }).map(t=>`✓ ${isEN? enOnly(t) : t}`).join('<br>')}</div>
         <div style="font-size:12px; color:#8CA891; font-weight:700; margin-top:10px;">${isEN? '✨ Customizable services available' : '✨ 可定制服务 Customizable services available'}</div>
       </div>
-      ${!km? `<div style="background:#fff; border:1px solid #EDE2D0; border-radius:14px; padding:14px 18px; margin-bottom:12px; font-size:13px;">
-        <div style="display:flex; justify-content:space-between; padding:3px 0; font-weight:700;"><span>${isEN?'Per Visit':'单次价格 Per Visit'}</span><span>${fmt((doc.visits&&doc.visits[0])?doc.visits[0].price:0)}</span></div>
-      </div>` : ''}
-      ${cctvOn? `<div style="font-size:12.5px; color:#6b5f4f; margin-bottom:6px;">+ ${isEN?'CCTV Rental':'CCTV 租用 CCTV Rental'} (${doc.cctv.days} days × ${fmt(doc.cctv.rate)}) = ${fmt(cctvTotal)}</div>`:''}
-      ${holidayOn? `<div style="font-size:12.5px; color:#6b5f4f; margin-bottom:6px;">+ ${isEN?'Holiday Fee':'节日费 Holiday Fee'} = ${fmt(holidayTotal)}</div>`:''}
+      <div style="background:#fff; border:1px solid #EDE2D0; border-radius:14px; padding:14px 18px; margin-bottom:12px; font-size:13px;">
+        <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>${totalDays} ${isEN?'days':'天'} × ${fmt(unitPrice)}</span><span style="font-weight:700;">${fmt(visitsTotal)}</span></div>
+        ${cctvOn? `<div style="display:flex; justify-content:space-between; padding:3px 0;"><span>${isEN?'CCTV Rental':'CCTV 租用'} (${doc.cctv.days} × ${fmt(doc.cctv.rate)})</span><span>${fmt(cctvTotal)}</span></div>` : ''}
+        ${holidayOn? `<div style="display:flex; justify-content:space-between; padding:3px 0;"><span>${isEN?'Holiday Fee':'节日费'}</span><span>${fmt(holidayTotal)}</span></div>` : ''}
+        ${discountOn? `<div style="display:flex; justify-content:space-between; padding:3px 0; color:#D97066;"><span>🏷️ ${isEN?'Discount':'折扣'} ${doc.discount.type==='percent'?`(${doc.discount.amount}%)`:''}</span><span>-${fmt(discountTotal)}</span></div>` : ''}
+        <div style="height:1px;background:#EDE2D0;margin:6px 0;"></div>
+        <div style="display:flex; justify-content:space-between; padding:3px 0; font-weight:800; font-size:14px;"><span>${isEN?'Total':'总额'}</span><span>${fmt(total)}</span></div>
+      </div>
       `}
 
       ${type==='invoice'? `<div style="margin-top:14px; font-size:12px; color:#6b5f4f; white-space:pre-line;">${(DB.settings.serviceNotes||'').split('\n').map(l=>'** '+l).join('\n')}</div>` : ''}
