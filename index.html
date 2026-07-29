@@ -353,12 +353,19 @@ function resizeImageFile(file, maxDim, cb){
   reader.readAsDataURL(file);
 }
 function fmt(n){ return 'MYR ' + (Number(n)||0).toFixed(2); }
+function enOnly(s){ return (s||'').replace(/[\u4e00-\u9fff、。，：]/g,'').replace(/\s+/g,' ').trim(); }
 function todayStr(){ return new Date().toISOString().slice(0,10); }
 function val(id){ const e=document.getElementById(id); return e? e.value : ''; }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 1900); }
 const AVA_COLORS=['#8CA891','#F3A57E','#E7B04E','#E6A0A6','#7FA7C4','#B79AD1'];
 function avaColor(seed){ let h=0; for(const c of seed) h+=c.charCodeAt(0); return AVA_COLORS[h%AVA_COLORS.length]; }
 function initials(name){ return (name||'?').trim().slice(0,1).toUpperCase(); }
+function whatsappLink(phone){
+  let digits = (phone||'').replace(/[^\d]/g, '');
+  if(digits.startsWith('0')) digits = '6' + digits;
+  else if(!digits.startsWith('60')) digits = '60' + digits;
+  return `https://wa.me/${digits}`;
+}
 function dowLabel(ds){ try{ return new Date(ds+'T00:00:00').toLocaleDateString('zh-CN',{weekday:'long'});}catch(e){return '';} }
 function daysBetweenInclusive(a,b){ if(!a||!b) return 0; const d1=new Date(a+'T00:00:00'), d2=new Date(b+'T00:00:00'); return Math.round((d2-d1)/86400000)+1; }
 
@@ -410,7 +417,14 @@ function toggleLang(){
   render();
 }
 
-function setTab(t){ state.tab=t; state.clientId=null; state.invId=null; state.quoteId=null; render(); }
+function setTab(t){
+  if(state.tab===t && !state.clientId && !state.invId && !state.quoteId){
+    window.scrollTo({top:0, behavior:'smooth'});
+    return;
+  }
+  state.tab=t; state.clientId=null; state.invId=null; state.quoteId=null; render();
+  window.scrollTo({top:0});
+}
 function __blockBgTouch(e){
   if(!e.target.closest('#modalCard')) e.preventDefault();
 }
@@ -523,6 +537,8 @@ function renderToday(){
   const monthIncome = (allFinancials[monthPrefix] || {income:0}).income;
   const totalIncome = Object.values(allFinancials).reduce((s,m)=>s+m.income,0);
   const totalServiceCount = DB.invoices.reduce((s,inv)=> s+(inv.visits||[]).length, 0);
+  const totalClients = DB.clients.length;
+  const totalCats = DB.clients.reduce((s,c)=> s+(c.pets||[]).length, 0);
   let outstanding=0;
   DB.invoices.forEach(inv=>{ const paid=(inv.payments||[]).reduce((s,p)=>s+Number(p.amount),0); const tot=docTotal(inv); if(tot-paid>0.001) outstanding += (tot-paid); });
 
@@ -553,6 +569,16 @@ function renderToday(){
     <h3 style="margin:0 0 4px;">🚩 我的领地 My Territory</h3>
     <div class="muted" style="font-size:12px; margin-bottom:10px;">每位客户地址上的一面旗 A flag for every client address</div>
     <div id="territoryMapContainer">${renderTerritoryBoard()}</div>
+  </div>
+  <div class="row" style="gap:10px; margin-bottom:14px;">
+    <div class="card" style="background:#DCE3F0; border:none; text-align:center; padding:16px; flex:1;">
+      <div class="muted" style="font-size:12px;">现有客户 Clients</div>
+      <div style="font-size:24px; font-weight:800; color:#5C6E8C;">${totalClients}</div>
+    </div>
+    <div class="card" style="background:#DCE3F0; border:none; text-align:center; padding:16px; flex:1;">
+      <div class="muted" style="font-size:12px;">🐱 相遇的猫咪 Cats Met</div>
+      <div style="font-size:24px; font-weight:800; color:#5C6E8C;">${totalCats}</div>
+    </div>
   </div>
   <div class="card" style="margin-bottom:16px; padding:14px;">
     <h3 style="margin:0 0 4px;">🎂 猫咪生日/纪念日 Cat Birthdays</h3>
@@ -750,27 +776,82 @@ function hashStr(s){
   for(let i=0;i<s.length;i++){ h = (h*31 + s.charCodeAt(i)) >>> 0; }
   return h;
 }
+const TERRITORY_AREAS = [
+  {key:'srihartamas', label:'Sri Hartamas', match:['sri hartamas','mont kiara'], color:'#C9A6E6', x:66, y:50},
+  {key:'sri', label:'Sri Damansara', match:['sri damansara','ativo suite'], color:'#E7B04E', x:53, y:52},
+  {key:'kota', label:'Kota Damansara', match:['kota damansara','tropicana indah'], color:'#F3A57E', x:48, y:56},
+  {key:'damansaraperdana', label:'Damansara Perdana', match:['damansara perdana','empire city','empire damansara','damansara foresta'], color:'#B5C98E', x:41, y:58},
+  {key:'aradamansara', label:'Ara Damansara', match:['ara damansara'], color:'#8FBFA6', x:35, y:61},
+  {key:'ttdi', label:'TTDI', match:['ttdi','taman tun','tropics pj','tropicana city tropics'], color:'#E6A0A6', x:57, y:59},
+  {key:'seapark', label:'Sea Park', match:['sea park','pacific tower'], color:'#D9C39A', x:48, y:63},
+  {key:'oldklang', label:'Old Klang Rd', match:['old klang road','old klang','oldklang','jalan universiti','latitud'], color:'#9FB4DE', x:55, y:66},
+  {key:'subang', label:'Subang Jaya', match:['subang jaya','usj','subang main place'], color:'#8CA891', x:51, y:71},
+  {key:'puchong', label:'Puchong', match:['puchong','bloomsvale','nest 2 residence'], color:'#E68A57', x:60, y:72},
+  {key:'klcity', label:'KL City', match:['conlay'], color:'#D6A6C9', x:67, y:62},
+  {key:'sungaibesi', label:'Sungai Besi', match:['trion','sungai besi'], color:'#A9C9D6', x:70, y:67},
+];
+function matchTerritoryArea(address){
+  const a = (address||'').toLowerCase();
+  for(const area of TERRITORY_AREAS){ if(area.match.some(m=>a.includes(m))) return area; }
+  return null;
+}
+const SELANGOR_PATH = "M15,25 L70,10 L135,34 L185,50 L225,76 L234,110 L230,147 L240,189 L255,225 L250,252 L234,285 L216,320 L204,360 L188,386 L155,399 L120,390 L105,340 L98,300 L90,258 L78,215 L72,168 L58,130 L45,90 L28,55 Z";
+const SELANGOR_HOLES = [
+  {cx:204, cy:262, r:20},
+  {cx:213, cy:300, r:9}
+];
 function renderTerritoryBoard(){
   const clientsWithAddr = DB.clients.filter(c=> c.address && c.address.trim());
   if(!clientsWithAddr.length) return `<div class="muted" style="padding:30px 10px; text-align:center;">还没有客户地址 No client addresses yet</div>`;
-  const flags = clientsWithAddr.map(c=>{
-    const h = hashStr(c.id);
-    const x = 8 + (h % 84);
-    const y = 14 + (Math.floor(h/97) % 72);
-    return `<div style="position:absolute; left:${x}%; top:${y}%; transform:translate(-50%,-100%); text-align:center; cursor:pointer;" onclick="state.tab='clients'; state.clientId='${c.id}'; render();">
-      <div style="font-size:26px; filter:drop-shadow(0 2px 2px rgba(0,0,0,0.18));">🚩</div>
-      <div style="font-size:9px; font-weight:800; color:#6C8B72; background:#fff; padding:1px 6px; border-radius:8px; white-space:nowrap; margin-top:-2px; display:inline-block;">${c.name}</div>
-    </div>`;
+
+  const byArea = {}; const unmatched = [];
+  clientsWithAddr.forEach(c=>{
+    const area = matchTerritoryArea(c.address);
+    if(area){ (byArea[area.key] = byArea[area.key]||[]).push(c); } else { unmatched.push(c); }
+  });
+
+  const pins = TERRITORY_AREAS.map(area=>{
+    const clients = byArea[area.key]||[];
+    const flags = clients.map((c,i)=>{
+      const h = hashStr(c.id);
+      const jx = ((h%7)-3)*1.6;
+      const jy = ((Math.floor(h/7)%7)-3)*1.6;
+      return `<div style="position:absolute; left:calc(${area.x}% + ${jx}px); top:calc(${area.y}% + ${jy}px - 10px); transform:translate(-50%,-100%); font-size:10px; cursor:pointer; z-index:5; filter:drop-shadow(0 1px 1px rgba(0,0,0,0.25));" onclick="state.tab='clients'; state.clientId='${c.id}'; render();" title="${c.name}">🚩</div>`;
+    }).join('');
+    return `<div style="position:absolute; left:${area.x}%; top:${area.y}%; width:8px; height:8px; margin:-4px; border-radius:50%; background:${area.color}; border:1.5px solid #fff; box-shadow:0 1px 3px rgba(0,0,0,0.25);"></div>
+    ${flags}`;
   }).join('');
-  return `<div style="position:relative; width:100%; height:280px; border-radius:16px; overflow:hidden; background:
-      radial-gradient(circle at 18% 28%, rgba(140,168,145,0.22) 0, transparent 30%),
-      radial-gradient(circle at 82% 18%, rgba(243,165,126,0.22) 0, transparent 28%),
-      radial-gradient(circle at 62% 78%, rgba(140,168,145,0.18) 0, transparent 32%),
-      radial-gradient(circle at 12% 82%, rgba(231,176,78,0.2) 0, transparent 26%),
-      radial-gradient(circle at 45% 50%, rgba(230,138,87,0.10) 0, transparent 40%),
-      var(--card-alt);">
-    ${flags}
-  </div>`;
+
+  const zoom = window.__territoryZoom || 1;
+  const boxW = Math.round(216*zoom), boxH = Math.round(302*zoom);
+  const legend = TERRITORY_AREAS.map(a=>`<span style="display:inline-flex; align-items:center; gap:4px; margin:0 8px 4px 0; font-size:10.5px; color:#5c5346;"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${a.color};"></span>${a.label}</span>`).join('');
+
+  return `<div style="position:relative;">
+    <div style="position:absolute; right:8px; top:8px; z-index:10; display:flex; flex-direction:column; gap:4px;">
+      <button onclick="zoomTerritoryMap(0.5)" style="width:28px;height:28px;border-radius:8px;border:none;background:rgba(255,255,255,0.9);box-shadow:0 1px 4px rgba(0,0,0,0.2);font-weight:800;font-size:15px;cursor:pointer;">+</button>
+      <button onclick="zoomTerritoryMap(-0.5)" style="width:28px;height:28px;border-radius:8px;border:none;background:rgba(255,255,255,0.9);box-shadow:0 1px 4px rgba(0,0,0,0.2);font-weight:800;font-size:15px;cursor:pointer;">−</button>
+    </div>
+    <div style="width:100%; height:320px; border-radius:16px; overflow:auto; background:var(--card-alt); display:flex; align-items:${zoom>1?'flex-start':'center'}; justify-content:center;">
+      <div id="territoryMapInner" style="position:relative; width:${boxW}px; height:${boxH}px; flex:none; margin:${zoom>1?'10px':'0'} auto;">
+        <svg viewBox="0 0 300 420" style="position:absolute; inset:0; width:100%; height:100%;">
+          <path d="${SELANGOR_PATH} ${SELANGOR_HOLES.map(h=>`M${h.cx-h.r},${h.cy} a${h.r},${h.r} 0 1,0 ${h.r*2},0 a${h.r},${h.r} 0 1,0 -${h.r*2},0 Z`).join(' ')}" fill="#8CA891" fill-opacity="0.35" stroke="#6C8B72" stroke-width="2.5" stroke-linejoin="miter" fill-rule="evenodd"/>
+          ${SELANGOR_HOLES.map(h=>`<circle cx="${h.cx}" cy="${h.cy}" r="${h.r}" fill="none" stroke="#c9bda3" stroke-width="1.2" stroke-dasharray="2,2"/>`).join('')}
+          <text x="95" y="175" transform="rotate(-70 95 175)" font-family="'Fredoka',sans-serif" font-size="30" font-weight="700" fill="#8a8577" fill-opacity="0.45" text-anchor="middle">Selangor</text>
+        </svg>
+        <div style="position:absolute; left:${(SELANGOR_HOLES[0].cx/300*100).toFixed(1)}%; top:${(SELANGOR_HOLES[0].cy/420*100).toFixed(1)}%; transform:translate(-50%,-50%); font-size:6px; font-weight:800; color:#8a7f6b; white-space:nowrap;">KL</div>
+        <div style="position:absolute; inset:0;">
+          ${pins}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="margin-top:8px; line-height:1.6;">${legend}</div>
+  ${unmatched.length? `<div class="muted" style="font-size:11px; margin-top:4px;">其他地区未归类 Not in the areas above: ${unmatched.map(c=>c.name).join('、')}</div>` : ''}`;
+}
+function zoomTerritoryMap(delta){
+  window.__territoryZoom = Math.max(1, Math.min(3, (window.__territoryZoom||1) + delta));
+  const container = document.getElementById('territoryMapContainer');
+  if(container) container.innerHTML = renderTerritoryBoard();
 }
 
 function getUpcomingCatDates(daysAhead){
@@ -1008,7 +1089,7 @@ function renderClientDetail(id){
   <div class="card" style="text-align:center; padding:22px 18px;">
     <div class="avatar" style="width:64px;height:64px;border-radius:20px;font-size:22px;margin:0 auto 10px;background:${avaColor(c.name)}">${initials(c.name)}</div>
     <h2 style="margin-bottom:2px;">${c.name}</h2>
-    <div class="muted">${c.phone||'无电话'}</div>
+    ${c.phone? `<a href="${whatsappLink(c.phone)}" target="_blank" style="text-decoration:none; color:var(--sage-dark); font-weight:800; font-size:13.5px;">💬 ${c.phone}</a>` : `<div class="muted">无电话</div>`}
     <div class="row" style="margin-top:14px; justify-content:center; gap:8px;">
       <button class="btn btn-soft" onclick="openClientForm('${c.id}')">✏️ 编辑资料</button>
       <button class="btn btn-danger" onclick="deleteClient('${c.id}')">删除</button>
@@ -1416,11 +1497,11 @@ function openDocForm(type, id){
   <input type="number" id="f_doc_catcount" value="${doc&&doc.catCount? doc.catCount : (type==='invoice' && getClientById(window.__docClientId)? getClientById(window.__docClientId).pets.length||1 : 1)}" onchange="applySuggestedPriceToAll()">
   <button class="btn btn-soft btn-block" style="margin-bottom:14px;" onclick="applySuggestedPriceToAll()">🧮 按${type==='quote'?'路线距离':'客户里程'}计算建议单价，套用到全部天数</button>
 
-  <label class="flabel">每日行程</label>
-  <div class="muted tap" style="text-align:right; margin:-6px 2px 6px; color:var(--sage-dark); font-weight:800; font-size:12px; cursor:pointer;" onclick="toggleTaskOptionsManage()">✏️ 管理服务细节清单 Manage list</div>
-  <div id="taskOptionsManageWrap" style="display:none;"></div>
+  <label class="flabel">${type==='quote'?'服务概要 Service Summary':'每日行程'}</label>
+  ${type==='invoice'? `<div class="muted tap" style="text-align:right; margin:-6px 2px 6px; color:var(--sage-dark); font-weight:800; font-size:12px; cursor:pointer;" onclick="toggleTaskOptionsManage()">✏️ 管理服务细节清单 Manage list</div>
+  <div id="taskOptionsManageWrap" style="display:none;"></div>` : ''}
   <div id="visitsWrap"></div>
-  <button class="btn btn-outline btn-block" style="margin-bottom:14px;" onclick="addVisitRow()">＋ 手动添加一天</button>
+  ${type==='invoice'? `<button class="btn btn-outline btn-block" style="margin-bottom:14px;" onclick="addVisitRow()">＋ 手动添加一天</button>` : ''}
 
   <div class="divider"></div>
   <div class="checkline"><input type="checkbox" id="f_doc_cctv_needed" ${cctv.needed?'checked':''} onchange="toggleCctvFields()"> 需要租用 CCTV 监视器</div>
@@ -1567,6 +1648,19 @@ function resetHolidays(){
 }
 function renderVisitRows(){
   const wrap = document.getElementById('visitsWrap'); if(!wrap) return;
+  if(window.__docType === 'quote'){
+    const count = window.__visits.length;
+    const price = count? (window.__visits[0].price||0) : 0;
+    wrap.innerHTML = `
+      <div class="visitrow">
+        <div class="muted" style="margin-bottom:8px;">共 ${count} 天 Total ${count} days（报价阶段不需要按天挑选服务细节 no need to pick daily tasks yet）</div>
+        <label class="flabel">统一单价 Price per visit (RM)</label>
+        <input type="number" id="f_quote_unit_price" value="${price}" oninput="window.__visits.forEach(v=>v.price=Number(this.value)||0); document.getElementById('quotePriceTotal').textContent=fmt((Number(this.value)||0)*window.__visits.length);">
+        <div class="muted" style="margin-top:8px;">预计总额 Estimated Total: <span id="quotePriceTotal" style="font-weight:800; color:var(--sage-dark);">${fmt(price*count)}</span></div>
+      </div>
+    `;
+    return;
+  }
   wrap.innerHTML = window.__visits.map((v,idx)=>`
     <div class="visitrow">
       <div class="vtop">
@@ -1697,6 +1791,7 @@ function renderDocDetail(type, id){
     <button class="btn btn-outline btn-block" onclick="genPDF('quote','${doc.id}')">⤓ 生成 PDF</button>
     <button class="btn btn-peach btn-block" onclick="convertToInvoice('${doc.id}')">转为账单 To Invoice</button>
   </div>
+  <button class="btn btn-soft btn-block" style="margin-bottom:10px;" onclick="copyQuoteText('${doc.id}')">📋 复制报价内容（可直接贴到WhatsApp）Copy Quote Text</button>
   <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="duplicateDoc('quote','${doc.id}')">📋 复制这张报价，建一张新的 Duplicate this quote</div>
   <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="genPDF('quote','${doc.id}','inline')">👁 在这里预览PDF内容 Preview here (works inside Claude)</div>
   <div class="muted" style="text-align:center; margin:-4px 0 10px; font-size:12px; line-height:1.6;">手机上：PDF会在新页面打开，点分享图标 → 存储到"文件"App 保存<br>On phone: PDF opens in a new tab — tap Share → Save to Files</div>`}
@@ -1716,6 +1811,59 @@ function deleteDoc(type,id){
   });
 }
 function setQuoteStatus(id, status){ const q = DB.quotes.find(x=>x.id===id); q.status=status; save('quotes'); render(); toast('状态已更新'); }
+function copyQuoteText(id){
+  const doc = DB.quotes.find(x=>x.id===id); if(!doc) return;
+  const c = DB.clients.find(x=>x.id===doc.clientId);
+  const isEN = state.lang === 'en';
+  const total = docTotal(doc);
+  const dep = depositAmt(doc);
+  const totalDays = daysBetweenInclusive(doc.startDate, doc.endDate);
+  const perVisit = (doc.visits&&doc.visits[0])? doc.visits[0].price : 0;
+  const km = (c&&c.km) || (doc.route&&doc.route.distanceKm) || 0;
+  const included = (DB.settings.taskOptions||[]).filter(t=>{
+    const low = t.toLowerCase();
+    return !low.includes('medication') && !low.includes('喂药') && !low.includes('grooming') && !low.includes('梳毛');
+  });
+  const lines = [];
+  lines.push(isEN? `${DB.settings.businessName} Quotation` : `${DB.settings.businessName} 报价单 Quotation`);
+  lines.push(`${doc.no}`);
+  lines.push('');
+  lines.push(`${isEN?'Client':'客户 Client'}: ${c?c.name:(doc.leadName||'—')}`);
+  lines.push(`${isEN?'Dates':'服务日期 Dates'}: ${doc.startDate||'—'} ~ ${doc.endDate||'—'} (${totalDays} ${isEN?'days':'天/days'})`);
+  if(km) lines.push(`${isEN?'Distance':'距离 Distance'}: ${km}km`);
+  lines.push('');
+  lines.push(isEN? "What's Included:" : '服务包含 Included:');
+  included.forEach(t=> lines.push(`✓ ${isEN? enOnly(t) : t}`));
+  lines.push(isEN? '(Customizable services available)' : '（可定制服务 Customizable services available）');
+  lines.push('');
+  lines.push(isEN? 'How pricing is calculated:' : '收费计算方式 How pricing is calculated:');
+  if(isEN){
+    lines.push(`Within ${DB.settings.baseKm}km round-trip, base fee is ${fmt(DB.settings.baseRate)} (up to ${DB.settings.baseCats} cats included).`);
+    lines.push(`Beyond ${DB.settings.baseKm}km, +${fmt(DB.settings.extraKmRate)} for every extra ${DB.settings.extraKmBlock}km.`);
+    lines.push(`More than ${DB.settings.baseCats} cats: +${fmt(DB.settings.extraCatRate)} per additional cat.`);
+  } else {
+    lines.push(`往返 ${DB.settings.baseKm}km 内，基本服务费是 ${fmt(DB.settings.baseRate)}（含最多 ${DB.settings.baseCats} 只猫）。`);
+    lines.push(`超过 ${DB.settings.baseKm}km，每多 ${DB.settings.extraKmBlock}km 加收 ${fmt(DB.settings.extraKmRate)}。`);
+    lines.push(`猫咪超过 ${DB.settings.baseCats} 只，每多一只加收 ${fmt(DB.settings.extraCatRate)}。`);
+  }
+  lines.push('');
+  lines.push(`${isEN?'Per Visit':'单次价格 Per Visit'}: ${fmt(perVisit)}`);
+  if(doc.cctv&&doc.cctv.needed) lines.push(`${isEN?'CCTV Rental':'CCTV 租用 Rental'}: ${fmt((Number(doc.cctv.days)||0)*(Number(doc.cctv.rate)||0))}`);
+  if(doc.holidayFee&&doc.holidayFee.needed) lines.push(`${isEN?'Holiday Fee':'节日费 Holiday Fee'}: ${fmt(Number(doc.holidayFee.amount)||0)}`);
+  if(doc.notes) { lines.push(''); lines.push(`${isEN?'Notes':'备注 Notes'}: ${doc.notes}`); }
+  const text = lines.join('\n');
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(()=> toast('已复制，可以直接贴到WhatsApp了 📋')).catch(()=> fallbackCopy(text));
+  } else { fallbackCopy(text); }
+}
+function fallbackCopy(text){
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position='fixed'; ta.style.left='-9999px';
+  document.body.appendChild(ta); ta.focus(); ta.select();
+  try{ document.execCommand('copy'); toast('已复制 📋'); }
+  catch(e){ toast('复制失败，请手动选取文字'); }
+  document.body.removeChild(ta);
+}
 function duplicateDoc(type, id){
   const list = type==='invoice'? DB.invoices : DB.quotes;
   const src = list.find(x=>x.id===id);
@@ -2121,6 +2269,7 @@ function renderAnalytics(){
 
 /* ---------------- PDF export ---------------- */
 function genPDF(type, id, mode){
+  const isEN = state.lang === 'en';
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   if(!mode){ mode = HAS_CLAUDE_STORAGE ? 'inline' : (isMobile ? 'view' : undefined); }
   let preOpenedWindow = null;
@@ -2178,11 +2327,11 @@ function genPDF(type, id, mode){
       ${p.photo? `<img src="${p.photo}" style="width:110px;height:110px;object-fit:cover;border-radius:14px;">` : ''}
     </div>`).join('') : `<div style="color:#9C8F7E; font-size:13px;">${c.id? '未登记宠物资料 No pet profile yet' : '报价阶段暂无宠物资料 No pet profile at quote stage'}</div>`;
 
-  const qrBlocks = (DB.settings.qrCodes||[]).map(q=>`
+  const qrBlocks = type==='invoice' ? (DB.settings.qrCodes||[]).map(q=>`
     <div style="background:#fff; border:1px solid #EDE2D0; border-radius:16px; padding:14px; text-align:center; margin-bottom:14px;">
       <div style="font-weight:800; margin-bottom:8px;">${q.label||'收款码 Payment QR'}</div>
       <img src="${q.image}" style="width:150px;height:auto;display:block;margin:0 auto;">
-    </div>`).join('');
+    </div>`).join('') : '';
 
   const estBox = km? `
     <div style="background:#fff; border:1px solid #EDE2D0; border-radius:14px; padding:12px 14px; font-size:12.5px; margin-bottom:14px;">
@@ -2219,6 +2368,22 @@ function genPDF(type, id, mode){
         <div style="text-align:right; color:#9C8F7E; font-size:12px;">生成日期 Date: ${todayStr()}</div>
       </div>
 
+      ${type==='quote' && doc.route && (doc.route.origin || doc.route.destination) ? `
+      <div style="display:flex; align-items:center; gap:14px; margin-bottom:16px; padding:14px 18px; background:#fff; border:1px solid #EDE2D0; border-radius:14px;">
+        <div style="display:flex; flex-direction:column; align-items:center; padding-top:3px;">
+          <div style="width:10px;height:10px;border-radius:50%;background:#6C8B72;"></div>
+          <div style="width:2px; height:30px; background:#6C8B72; opacity:0.4;"></div>
+          <div style="width:10px;height:10px;border-radius:50%;background:#E68A57;"></div>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:13px; font-weight:700; color:#3E362C;">${doc.route.origin||'—'}</div>
+          <div style="height:18px;"></div>
+          <div style="font-size:13px; font-weight:700; color:#3E362C;">${doc.route.destination||'—'}</div>
+        </div>
+        ${doc.route.distanceKm? `<div style="background:#CFE0F0; color:#3E362C; font-weight:800; padding:8px 16px; border-radius:10px; font-size:15px; white-space:nowrap; flex:none;">${doc.route.distanceKm}km</div>` : ''}
+      </div>
+      ` : ''}
+
       <div style="background:#F4ECDF; border-radius:14px; padding:14px 18px; margin-bottom:16px;">
         <div style="font-weight:800; margin-bottom:6px;">Customer Info</div>
         <table style="width:100%; font-size:13px; border-collapse:collapse;">
@@ -2234,6 +2399,7 @@ function genPDF(type, id, mode){
       <div style="font-weight:800; margin-bottom:8px;">Cat(s) Info</div>
       ${petBlocks}
 
+      ${type==='invoice'? `
       <table style="width:100%; border-collapse:collapse; font-size:13px; margin-top:6px;">
         <tr style="background:#8CA891; color:#fff;">
           <th style="padding:8px 6px; text-align:left;">Date</th><th style="padding:8px 6px; text-align:left;">Day</th><th style="padding:8px 6px; text-align:left;">Time Slot</th><th style="padding:8px 6px; text-align:left;">Remarks</th><th style="padding:8px 6px; text-align:right;">Price (RM)</th>
@@ -2242,16 +2408,46 @@ function genPDF(type, id, mode){
         ${cctvRow}
         ${holidayRow}
       </table>
+      ` : `
+      <div style="font-weight:800; margin-bottom:8px; margin-top:14px;">${isEN?"What's Included":"服务包含 What's Included"}</div>
+      <div style="background:#F4ECDF; border-radius:14px; padding:14px 18px; margin-bottom:12px;">
+        <div style="font-size:13px; color:#3E362C;">${(DB.settings.taskOptions||[]).filter(t=>{
+          const low = t.toLowerCase();
+          return !low.includes('medication') && !low.includes('喂药') && !low.includes('grooming') && !low.includes('梳毛');
+        }).map(t=>`✓ ${isEN? enOnly(t) : t}`).join('<br>')}</div>
+        <div style="font-size:12px; color:#8CA891; font-weight:700; margin-top:10px;">${isEN? '✨ Customizable services available' : '✨ 可定制服务 Customizable services available'}</div>
+      </div>
+      <div style="background:#fff; border:1px solid #EDE2D0; border-radius:14px; padding:14px 18px; margin-bottom:12px; font-size:13px;">
+        <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>${isEN?'Service Dates':'服务日期 Service Dates'}</span><span style="font-weight:700;">${doc.startDate||'—'} ~ ${doc.endDate||'—'}</span></div>
+        <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>${isEN?'Total Days':'共 Total Days'}</span><span style="font-weight:700;">${totalDays} ${isEN?'days':'天/days'}</span></div>
+        <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>${isEN?'Per Visit':'单次价格 Per Visit'}</span><span style="font-weight:700;">${fmt((doc.visits&&doc.visits[0])?doc.visits[0].price:0)}</span></div>
+      </div>
+      <div style="background:#fff; border:1px solid #EDE2D0; border-radius:14px; padding:14px 18px; margin-bottom:12px; font-size:12px; color:#6b5f4f; line-height:1.7;">
+        <div style="font-weight:800; color:#3E362C; margin-bottom:4px;">${isEN? 'How pricing is calculated' : '收费计算方式 How pricing is calculated'}</div>
+        ${isEN? `
+        <div>Within ${DB.settings.baseKm}km round-trip, base fee is ${fmt(DB.settings.baseRate)} (up to ${DB.settings.baseCats} cats included).</div>
+        <div>Beyond ${DB.settings.baseKm}km, +${fmt(DB.settings.extraKmRate)} for every extra ${DB.settings.extraKmBlock}km.</div>
+        <div>More than ${DB.settings.baseCats} cats: +${fmt(DB.settings.extraCatRate)} per additional cat.</div>
+        ` : `
+        <div>往返 ${DB.settings.baseKm}km 内，基本服务费是 ${fmt(DB.settings.baseRate)}（含最多 ${DB.settings.baseCats} 只猫）。</div>
+        <div>超过 ${DB.settings.baseKm}km，每多 ${DB.settings.extraKmBlock}km 加收 ${fmt(DB.settings.extraKmRate)}。</div>
+        <div>猫咪超过 ${DB.settings.baseCats} 只，每多一只加收 ${fmt(DB.settings.extraCatRate)}。</div>
+        `}
+      </div>
+      ${cctvOn? `<div style="font-size:12.5px; color:#6b5f4f; margin-bottom:6px;">+ ${isEN?'CCTV Rental':'CCTV 租用 CCTV Rental'} (${doc.cctv.days} days × ${fmt(doc.cctv.rate)}) = ${fmt(cctvTotal)}</div>`:''}
+      ${holidayOn? `<div style="font-size:12.5px; color:#6b5f4f; margin-bottom:6px;">+ ${isEN?'Holiday Fee':'节日费 Holiday Fee'} = ${fmt(holidayTotal)}</div>`:''}
+      `}
 
       <div style="margin-top:14px; font-size:12px; color:#6b5f4f; white-space:pre-line;">${(DB.settings.serviceNotes||'').split('\n').map(l=>'** '+l).join('\n')}</div>
 
+      ${type==='invoice'? `
       <div style="margin-top:14px; background:#F4ECDF; border-radius:14px; padding:14px 18px; max-width:320px; margin-left:auto;">
         <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>总额 Total</span><span style="font-weight:800;">${fmt(total)}</span></div>
         <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>定金 Deposit (${doc.depositPercent||50}%)</span><span>${fmt(dep)}</span></div>
         <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>尾款 Remaining</span><span>${fmt(total-dep)}</span></div>
       </div>
-
       <div style="margin-top:16px; font-size:11.5px; color:#D97066; white-space:pre-line;">${DB.settings.terms||''}</div>
+      ` : ''}
       ${doc.notes? `<div style="margin-top:10px; font-size:12px; color:#6b5f4f;">备注 Notes: ${doc.notes}</div>`:''}
     </div>
     <div style="width:190px; flex:none;">
@@ -2372,6 +2568,25 @@ function settingsHTML(){
     <div class="muted" style="font-size:12.5px; margin-bottom:10px;">已登录 Logged in as：${fbUser.email}</div>
     <button class="btn btn-soft btn-block" onclick="doLogout()">退出登录 Log Out</button>
   </div>` : ''}
+
+  <div class="card" style="background:#F4ECDF; border:none; margin-bottom:14px;">
+    <h3>💾 存储占用 Storage Usage</h3>
+    ${(()=>{
+      const sizes = {clients:DB.clients, invoices:DB.invoices, quotes:DB.quotes, expenses:DB.expenses, settings:DB.settings};
+      let total = 0;
+      const rows = Object.entries(sizes).map(([k,v])=>{
+        const bytes = new Blob([JSON.stringify(v)]).size;
+        total += bytes;
+        return {k, bytes};
+      });
+      const fmtBytes = b => b>1024*1024? (b/1024/1024).toFixed(2)+' MB' : (b/1024).toFixed(1)+' KB';
+      return `
+      <div class="row" style="padding:4px 0; font-weight:800;"><span>App内数据总量（估算）</span><span>${fmtBytes(total)}</span></div>
+      ${rows.map(r=>`<div class="row" style="padding:2px 0; font-size:12px;"><span class="muted">${r.k}</span><span class="muted">${fmtBytes(r.bytes)}</span></div>`).join('')}
+      <div class="muted" style="font-size:11.5px; margin-top:10px; line-height:1.6;">这是App里数据的估算大小，不是Firestore免费额度的实际用量。想看精确的云端用量/额度，去 Firebase Console → 你的项目 → Firestore Database → Usage 标签查看。<br>This estimates the data inside the app, not your actual Firestore quota usage. For exact cloud usage, check the Firebase Console → your project → Firestore Database → Usage tab.</div>
+      `;
+    })()}
+  </div>
 
   <div class="card" style="background:#F4ECDF; border:none; margin-bottom:14px;">
     <h3>📲 加到手机主屏幕 Add to Home Screen</h3>
