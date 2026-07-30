@@ -619,7 +619,7 @@ function renderToday(){
   </div>
   <div class="card" style="margin-bottom:16px; padding:14px;">
     <h3 style="margin:0 0 4px;">🚩 我的领地 My Territory</h3>
-    <div class="muted" style="font-size:12px; margin-bottom:10px;">每位客户地址上的一面旗 A flag for every client address</div>
+    <div class="muted" style="font-size:12px; margin-bottom:10px;">地名越大代表这一区客户越多 Bigger name = more clients there</div>
     <div id="territoryMapContainer">${renderTerritoryBoard()}</div>
   </div>
   <div class="row" style="gap:10px; margin-bottom:14px;">
@@ -862,21 +862,24 @@ function renderTerritoryBoard(){
     if(area){ (byArea[area.key] = byArea[area.key]||[]).push(c); } else { unmatched.push(c); }
   });
 
-  const pins = TERRITORY_AREAS.map(area=>{
+  const counts = TERRITORY_AREAS.map(a=> (byArea[a.key]||[]).length).filter(c=>c>0);
+  const maxCount = counts.length? Math.max(...counts) : 1;
+  const minCount = counts.length? Math.min(...counts) : 1;
+
+  const labels = TERRITORY_AREAS.map(area=>{
     const clients = byArea[area.key]||[];
-    const flags = clients.map((c,i)=>{
-      const h = hashStr(c.id);
-      const jx = ((h%7)-3)*1.6;
-      const jy = ((Math.floor(h/7)%7)-3)*1.6;
-      return `<div style="position:absolute; left:calc(${area.x}% + ${jx}px); top:calc(${area.y}% + ${jy}px - 10px); transform:translate(-50%,-100%); font-size:10px; cursor:pointer; z-index:5; filter:drop-shadow(0 1px 1px rgba(0,0,0,0.25));" onclick="state.tab='clients'; state.clientId='${c.id}'; render();" title="${c.name}">🚩</div>`;
-    }).join('');
-    return `<div style="position:absolute; left:${area.x}%; top:${area.y}%; width:8px; height:8px; margin:-4px; border-radius:50%; background:${area.color}; border:1.5px solid #fff; box-shadow:0 1px 3px rgba(0,0,0,0.25);"></div>
-    ${flags}`;
+    if(!clients.length) return '';
+    const t = maxCount===minCount? 1 : (clients.length-minCount)/(maxCount-minCount);
+    const fontSize = (11 + t*16).toFixed(1);
+    const names = clients.map(c=>c.name).join('、');
+    return `<div style="position:absolute; left:${area.x}%; top:${area.y}%; transform:translate(-50%,-50%); text-align:center; cursor:pointer; z-index:5;" onclick="toast('${area.label} (${clients.length}) · ${names.replace(/'/g,"\\'")}')" title="${names}">
+      <div style="font-family:'Fredoka',sans-serif; font-weight:700; font-size:${fontSize}px; line-height:1.05; color:${area.color}; text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff; white-space:nowrap;">${area.label}</div>
+      <div style="font-size:${(fontSize*0.5).toFixed(1)}px; font-weight:800; color:#8a7f6b; margin-top:1px;">${clients.length}</div>
+    </div>`;
   }).join('');
 
   const zoom = window.__territoryZoom || 1;
   const boxW = Math.round(216*zoom), boxH = Math.round(302*zoom);
-  const legend = TERRITORY_AREAS.map(a=>`<span style="display:inline-flex; align-items:center; gap:4px; margin:0 8px 4px 0; font-size:10.5px; color:#5c5346;"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${a.color};"></span>${a.label}</span>`).join('');
 
   return `<div style="position:relative;">
     <div style="position:absolute; right:8px; top:8px; z-index:10; display:flex; flex-direction:column; gap:4px;">
@@ -892,13 +895,12 @@ function renderTerritoryBoard(){
         </svg>
         <div style="position:absolute; left:${(SELANGOR_HOLES[0].cx/300*100).toFixed(1)}%; top:${(SELANGOR_HOLES[0].cy/420*100).toFixed(1)}%; transform:translate(-50%,-50%); font-size:6px; font-weight:800; color:#8a7f6b; white-space:nowrap;">KL</div>
         <div style="position:absolute; inset:0;">
-          ${pins}
+          ${labels}
         </div>
       </div>
     </div>
   </div>
-  <div style="margin-top:8px; line-height:1.6;">${legend}</div>
-  ${unmatched.length? `<div class="muted" style="font-size:11px; margin-top:4px;">其他地区未归类 Not in the areas above: ${unmatched.map(c=>c.name).join('、')}</div>` : ''}`;
+  ${unmatched.length? `<div class="muted" style="font-size:11px; margin-top:8px;">其他地区未归类 Not in the areas above: ${unmatched.map(c=>c.name).join('、')}</div>` : ''}`;
 }
 function zoomTerritoryMap(delta){
   window.__territoryZoom = Math.max(1, Math.min(3, (window.__territoryZoom||1) + delta));
