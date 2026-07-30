@@ -200,10 +200,10 @@ const DEFAULT_REMARKS = "1. 洗碗+加猫粮\n2. 洗碗+加水\n3. wetfood\n4. �
 const DEFAULT_TASK_OPTIONS = ['洗碗+加猫粮 wash bowl & refill kibbles','洗碗+加水 wash bowl & refill water','准备湿粮 provide wetfood','打扫+清理猫砂 Clean litter box','陪玩 (若猫咪需要) Play time','喂药 Medication','梳毛 Grooming'];
 const MILESTONE_LIST = [10,25,50,100,150,200,300,500,750,1000,1500,2000,3000,5000,10000];
 const MILESTONE_TITLES = {
-  10:'🐾 崭露头角', 25:'🐱 稳步成长', 50:'😺 小有成绩', 100:'🎉 百单达成',
+  10:'🐾 崭露头角', 25:'🐱 稳步成长', 50:'😺 小有成绩', 100:'🎉 百次达成',
   150:'✨ 持续闪耀', 200:'🏆 两百里程碑', 300:'🌟 三百大关', 500:'💫 五百传奇',
-  750:'👑 七百五十单', 1000:'🎊 千单荣耀', 1500:'🚀 一千五百单', 2000:'🐯 两千猛虎',
-  3000:'💎 三千钻石', 5000:'🏅 五千传说', 10000:'🌈 万单奇迹'
+  750:'👑 七百五十次', 1000:'🎊 千次荣耀', 1500:'🚀 一千五百次', 2000:'🐯 两千猛虎',
+  3000:'💎 三千钻石', 5000:'🏅 五千传说', 10000:'🌈 万次奇迹'
 };
 const DEFAULT_HOLIDAYS = [
   {date:'2026-01-01', name:"New Year's Day"},
@@ -356,6 +356,7 @@ async function loadAll(){
 }
 let __saveQueue = Promise.resolve();
 function save(key){
+  if(key==='invoices') setTimeout(checkMilestone, 0);
   __saveQueue = __saveQueue.then(()=> saveWithRetry(key, 2));
   return __saveQueue;
 }
@@ -574,7 +575,7 @@ function renderToday(){
   const allFinancials = monthlyFinancials('service');
   const monthIncome = (allFinancials[monthPrefix] || {income:0}).income;
   const totalIncome = Object.values(allFinancials).reduce((s,m)=>s+m.income,0);
-  const totalServiceCount = DB.invoices.reduce((s,inv)=> s+(inv.visits||[]).length, 0);
+  const totalServiceCount = totalServiceCount_();
   const totalClients = DB.clients.length;
   const totalCats = DB.clients.reduce((s,c)=> s+(c.pets||[]).length, 0);
   let outstanding=0;
@@ -596,12 +597,12 @@ function renderToday(){
     </div>
   </div>
   ${(()=>{
-    const orderCount = DB.invoices.length;
-    const base = MILESTONE_LIST.filter(m=>m<=orderCount).pop() || 0;
+    const svcCount = totalServiceCount;
+    const base = MILESTONE_LIST.filter(m=>m<=svcCount).pop() || 0;
     return `<div class="card" style="padding:14px 18px 10px; margin-bottom:16px;">
-      <div class="row" style="margin-bottom:4px;"><span class="muted" style="font-size:12.5px;">🏆 里程碑之路 Milestone Path</span><span style="font-weight:800; font-size:13px;">${orderCount} 单</span></div>
-      ${renderMilestonePath(orderCount)}
-      ${base>0? `<div class="tap" style="margin-top:2px; text-align:center; color:var(--sage-dark); font-weight:700; font-size:12px;" onclick="generateMilestoneImage(${base}, ${orderCount})">📸 生成「${base}单」成就图 Generate Image</div>` : ''}
+      <div class="row" style="margin-bottom:4px;"><span class="muted" style="font-size:12.5px;">🏆 里程碑之路 Milestone Path</span><span style="font-weight:800; font-size:13px;">${svcCount} 次服务</span></div>
+      ${renderMilestonePath(svcCount)}
+      ${base>0? `<div class="tap" style="margin-top:2px; text-align:center; color:var(--sage-dark); font-weight:700; font-size:12px;" onclick="generateMilestoneImage(${base}, ${svcCount})">📸 生成「${base}次」成就图 Generate Image</div>` : ''}
     </div>`;
   })()}
   <div class="statgrid" style="margin-bottom:16px;">
@@ -1408,6 +1409,7 @@ function renderMoney(){
 }
 
 /* ---- shared invoice/quote model ---- */
+function totalServiceCount_(){ return DB.invoices.reduce((s,inv)=> s+(inv.visits||[]).length, 0); }
 function docSubtotal(doc){
   const visitsTotal = (doc.visits||[]).reduce((s,v)=>s+(Number(v.price)||0),0);
   const cctvTotal = (doc.cctv && doc.cctv.needed) ? (Number(doc.cctv.days)||0)*(Number(doc.cctv.rate)||0) : 0;
@@ -1853,7 +1855,6 @@ function saveDoc(type, id){
     save('settings');
   }
   save(type==='invoice'?'invoices':'quotes'); closeModal(); render(); toast('已保存 🐾');
-  if(type==='invoice' && !id) checkMilestone();
 }
 function pawPadSVG(cx, cy, s, filled, color){
   const padRx=5*s, padRy=6*s, padCy=cy+3*s;
@@ -1932,7 +1933,7 @@ function renderMilestonePath(orderCount){
   </svg>`;
 }
 function checkMilestone(){
-  const count = DB.invoices.length;
+  const count = totalServiceCount_();
   const shown = DB.settings.milestonesShown || [];
   if(!shown.length && count > MILESTONE_LIST[0]){
     // Existing historical data (not a brand-new business) — silently mark milestones
@@ -1949,7 +1950,7 @@ function checkMilestone(){
   }
 }
 function showMilestoneCelebration(n, count){
-  const title = MILESTONE_TITLES[n] || `🎉 ${n}单达成`;
+  const title = MILESTONE_TITLES[n] || `🎉 ${n}次达成`;
   const emoji = title.split(' ')[0];
   const label = title.slice(title.indexOf(' ')+1);
   const pieces = Array.from({length:24}).map((_,i)=>{
@@ -1965,8 +1966,8 @@ function showMilestoneCelebration(n, count){
       <div style="font-size:46px; margin-bottom:6px;">${emoji}</div>
       <h2 style="margin:0 0 8px;">${label}</h2>
       <div class="muted" style="font-size:14px; margin-bottom:2px;">你已经完成了</div>
-      <div style="font-size:40px; font-weight:800; color:var(--sage-dark); margin-bottom:4px;">${n} 单</div>
-      <div class="muted" style="font-size:12px; margin-bottom:22px;">（目前累计 ${count} 单）感谢每一位客户的信任，继续加油！🐱</div>
+      <div style="font-size:40px; font-weight:800; color:var(--sage-dark); margin-bottom:4px;">${n} 次</div>
+      <div class="muted" style="font-size:12px; margin-bottom:22px;">（目前累计 ${count} 次服务）感谢每一位客户的信任，继续加油！🐱</div>
       <button class="btn btn-primary btn-block" onclick="closeModal()">太棒了 Nice! 🎉</button>
       <button class="btn btn-soft btn-block" style="margin-top:10px;" onclick="generateMilestoneImage(${n}, ${count})">📸 生成图片发小红书 Generate Image</button>
     </div>
@@ -1974,7 +1975,7 @@ function showMilestoneCelebration(n, count){
 }
 function generateMilestoneImage(n, count){
   toast('正在生成图片…');
-  const title = MILESTONE_TITLES[n] || `🎉 ${n}单达成`;
+  const title = MILESTONE_TITLES[n] || `🎉 ${n}次达成`;
   const emoji = title.split(' ')[0];
   const label = title.slice(title.indexOf(' ')+1);
   const wrap = document.createElement('div');
@@ -1986,7 +1987,7 @@ function generateMilestoneImage(n, count){
     <div style="font-size:50px; font-weight:800; color:#3E362C; font-family:Fredoka,sans-serif; margin-bottom:50px;">${label}</div>
     <div style="font-size:34px; color:#8CA891; font-weight:700; margin-bottom:6px;">我们已经完成了</div>
     <div style="font-size:160px; font-weight:800; color:#6C8B72; font-family:Fredoka,sans-serif; line-height:1;">${n}</div>
-    <div style="font-size:42px; font-weight:800; color:#6C8B72; margin-bottom:70px;">单服务 🐾</div>
+    <div style="font-size:42px; font-weight:800; color:#6C8B72; margin-bottom:70px;">次服务 🐾</div>
     <div style="margin-top:auto; font-size:26px; color:#9C8F7E; font-weight:700;">感谢每一位主人的信任 🐾</div>
     <div style="font-size:20px; color:#c9bda3; margin-top:8px;">Thank you for trusting us with your cats</div>
   `;
@@ -2204,7 +2205,6 @@ function doConvertToInvoice(qid, clientId){
   delete data.status; delete data.leadName; delete data.leadPhone;
   DB.invoices.push(data); save('invoices'); save('settings');
   state.moneyTab='invoices'; state.quoteId=null; state.invId=data.id; render(); toast('已生成账单 🧾');
-  checkMilestone();
 }
 function openPaymentForm(invId){
   const inv = DB.invoices.find(x=>x.id===invId);
@@ -3115,7 +3115,6 @@ function runImport(){
   save('clients'); save('invoices'); save('expenses');
   closeModal(); render();
   toast(`已导入 ${addedClients} 位客户、${addedInvoices} 张账单、${addedExpenses} 条开销${updated? `，${updated}条已覆盖更新`:''}${skipped? `（${skipped}条已存在，跳过）`:''} 🎉`);
-  checkMilestone();
 }
 
 if(USE_FIREBASE && fbAuth){
