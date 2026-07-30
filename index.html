@@ -597,13 +597,11 @@ function renderToday(){
   </div>
   ${(()=>{
     const orderCount = DB.invoices.length;
-    const next = MILESTONE_LIST.find(m=> m>orderCount) || (MILESTONE_LIST[MILESTONE_LIST.length-1]*2);
     const base = MILESTONE_LIST.filter(m=>m<=orderCount).pop() || 0;
-    const pct = Math.min(100, Math.round(((orderCount-base)/(next-base))*100));
-    return `<div class="card" style="padding:14px 18px; margin-bottom:16px;">
-      <div class="row" style="margin-bottom:8px;"><span class="muted" style="font-size:12.5px;">🏆 下一个里程碑 Next Milestone</span><span style="font-weight:800; font-size:13px;">${orderCount} / ${next} 单</span></div>
-      <div style="height:8px; background:var(--card-alt); border-radius:6px; overflow:hidden;"><div style="height:100%; width:${pct}%; background:var(--sage-dark); border-radius:6px;"></div></div>
-      ${base>0? `<div class="tap" style="margin-top:10px; text-align:center; color:var(--sage-dark); font-weight:700; font-size:12px;" onclick="generateMilestoneImage(${base}, ${orderCount})">📸 生成「${base}单」成就图 Generate Image</div>` : ''}
+    return `<div class="card" style="padding:14px 18px 10px; margin-bottom:16px;">
+      <div class="row" style="margin-bottom:4px;"><span class="muted" style="font-size:12.5px;">🏆 里程碑之路 Milestone Path</span><span style="font-weight:800; font-size:13px;">${orderCount} 单</span></div>
+      ${renderMilestonePath(orderCount)}
+      ${base>0? `<div class="tap" style="margin-top:2px; text-align:center; color:var(--sage-dark); font-weight:700; font-size:12px;" onclick="generateMilestoneImage(${base}, ${orderCount})">📸 生成「${base}单」成就图 Generate Image</div>` : ''}
     </div>`;
   })()}
   <div class="statgrid" style="margin-bottom:16px;">
@@ -1856,6 +1854,82 @@ function saveDoc(type, id){
   }
   save(type==='invoice'?'invoices':'quotes'); closeModal(); render(); toast('已保存 🐾');
   if(type==='invoice' && !id) checkMilestone();
+}
+function pawPadSVG(cx, cy, s, filled, color){
+  const padRx=5*s, padRy=6*s, padCy=cy+3*s;
+  const toeRx=2.3*s, toeRy=3*s;
+  const toes = [[-5*s,-4*s],[-2*s,-7*s],[2*s,-7*s],[5*s,-4*s]];
+  const toeEls = toes.map(t=>`<ellipse cx="${(cx+t[0]).toFixed(1)}" cy="${(cy+t[1]).toFixed(1)}" rx="${toeRx.toFixed(1)}" ry="${toeRy.toFixed(1)}"/>`).join('');
+  const style = filled? `fill="${color}" stroke="none"` : `fill="none" stroke="${color}" stroke-width="1.6" stroke-dasharray="2.2,2.2"`;
+  return `<g ${style}>
+    <ellipse cx="${cx.toFixed(1)}" cy="${padCy.toFixed(1)}" rx="${padRx.toFixed(1)}" ry="${padRy.toFixed(1)}"/>
+    ${toeEls}
+  </g>`;
+}
+function renderMilestonePath(orderCount){
+  let curIdx = -1;
+  for(let i=0;i<MILESTONE_LIST.length;i++){ if(orderCount>=MILESTONE_LIST[i]) curIdx=i; else break; }
+  const startIdx = Math.max(0, curIdx-1);
+  const endIdx = Math.min(MILESTONE_LIST.length-1, startIdx+4);
+  const shown = MILESTONE_LIST.slice(startIdx, endIdx+1);
+  const n = shown.length;
+  const w = 600, h = 120, padX = 40, padY = 34;
+  const stepX = n>1? (w-padX*2)/(n-1) : 0;
+  const stepY = n>1? (h-padY)/(n-1) : 0;
+  const points = shown.map((m,i)=>({
+    m, idx: startIdx+i,
+    x: padX + i*stepX,
+    y: (h-padY/2) - i*stepY,
+    unlocked: m<=orderCount
+  }));
+  const pawTrail = points.slice(0, -1).map((p,i)=>{
+    const a = p, b = points[i+1];
+    const dx = b.x-a.x, dy = b.y-a.y;
+    const len = Math.sqrt(dx*dx+dy*dy)||1;
+    const px = -dy/len, py = dx/len;
+    const angle = Math.atan2(dy,dx) * 180/Math.PI + 90;
+    const segUnlocked = a.unlocked;
+    const color = segUnlocked? '#F3A57E' : '#DDD3C2';
+    const opacity = segUnlocked? 0.9 : 0.5;
+    const pawCount = 4;
+    const paws = [];
+    for(let k=1;k<pawCount;k++){
+      const t = k/pawCount;
+      const x = a.x + dx*t, y = a.y + dy*t;
+      const side = (k%2===0)? 7 : -7;
+      const ox = x + px*side, oy = y + py*side;
+      paws.push(`<g transform="rotate(${angle.toFixed(1)} ${ox.toFixed(1)} ${oy.toFixed(1)})" opacity="${opacity}">${pawPadSVG(ox, oy, 0.6, true, color)}</g>`);
+    }
+    return paws.join('');
+  }).join('');
+  let markerX = points[0].x, markerY = points[0].y;
+  const curPos = points.findIndex(p=>p.idx===curIdx);
+  if(curPos>=0 && curPos<points.length-1){
+    const a=points[curPos], b=points[curPos+1];
+    const t = Math.min(1, Math.max(0, (orderCount-a.m)/(b.m-a.m)));
+    markerX = a.x + (b.x-a.x)*t; markerY = a.y + (b.y-a.y)*t;
+  } else if(curPos===-1){
+    const b = points[0];
+    const t = Math.min(1, Math.max(0, orderCount/b.m));
+    const originX = b.x - stepX, originY = b.y + stepY;
+    markerX = originX + (b.x-originX)*t; markerY = originY + (b.y-originY)*t;
+  } else if(curPos===points.length-1){
+    markerX = points[curPos].x; markerY = points[curPos].y;
+  }
+  const flags = points.map(p=>{
+    const color = p.unlocked? '#6C8B72':'#C9BDA3';
+    const bg = p.unlocked? '#E9F1EA':'#F4ECDF';
+    return `<g>
+      <circle cx="${p.x}" cy="${p.y}" r="18" fill="${bg}" stroke="${color}" stroke-width="2.5"/>
+      ${pawPadSVG(p.x, p.y+2, p.unlocked?1.15:1, p.unlocked, p.unlocked?'#E68A57':'#C9BDA3')}
+      <text x="${p.x}" y="${p.y+34}" text-anchor="middle" font-size="12" font-weight="800" fill="${color}">${p.m}</text>
+    </g>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${w} ${h+16}" style="width:100%; height:110px; display:block;">
+    ${pawTrail}
+    ${flags}
+    <circle cx="${markerX.toFixed(1)}" cy="${markerY.toFixed(1)}" r="6" fill="#D97066"/>
+  </svg>`;
 }
 function checkMilestone(){
   const count = DB.invoices.length;
