@@ -1610,12 +1610,18 @@ function shiftDocCalMonth(delta){
   window.__docCalMonth = new Date(m.getFullYear(), m.getMonth()+delta, 1);
   document.getElementById('docCalWrap').innerHTML = docCalendarHTML();
 }
+function defaultTaskSelection(){
+  return (DB.settings.taskOptions||[]).filter(t=>{
+    const low = t.toLowerCase();
+    return !low.includes('medication') && !low.includes('喂药') && !low.includes('grooming') && !low.includes('梳毛');
+  });
+}
 function toggleDocCalDate(ds){
   if(!window.__visits) window.__visits=[];
   const idx = window.__visits.findIndex(v=>v.date===ds);
   if(idx>=0){ window.__visits.splice(idx,1); }
   else {
-    window.__visits.push({id:uid(), date:ds, timeSlot:'', tasks: DB.settings.taskOptions.slice(), extraNotes:'', price:0});
+    window.__visits.push({id:uid(), date:ds, timeSlot:'', tasks: defaultTaskSelection(), extraNotes:'', price:0});
     window.__visits.sort((a,b)=> a.date<b.date?-1:1);
   }
   updateDocDateRangeFromVisits();
@@ -1641,7 +1647,7 @@ function regenerateVisits(){
   window.__visits = [];
   dates.forEach(ds=>{
     for(let n=0; n<perDay; n++){
-      window.__visits.push({id:uid(), date:ds, timeSlot: perDay>1? (timeSlot+(n===0?' (第1次 / 1st)':' (第2次 / 2nd)')) : timeSlot, tasks: DB.settings.taskOptions.slice(), extraNotes:'', price:0});
+      window.__visits.push({id:uid(), date:ds, timeSlot: perDay>1? (timeSlot+(n===0?' (第1次 / 1st)':' (第2次 / 2nd)')) : timeSlot, tasks: defaultTaskSelection(), extraNotes:'', price:0});
     }
   });
   const cctvDaysInput = document.getElementById('f_doc_cctv_days');
@@ -1650,7 +1656,7 @@ function regenerateVisits(){
   toast(`已生成 ${window.__visits.length} 条行程`);
 }
 function addVisitRow(){
-  window.__visits.push({id:uid(), date: val('f_doc_end')||todayStr(), timeSlot: val('f_doc_timeslot')||'', tasks: DB.settings.taskOptions.slice(), extraNotes:'', price:0});
+  window.__visits.push({id:uid(), date: val('f_doc_end')||todayStr(), timeSlot: val('f_doc_timeslot')||'', tasks: defaultTaskSelection(), extraNotes:'', price:0});
   renderVisitRows();
 }
 function toggleVisitTask(visitIdx, optIdx, checked){
@@ -1882,20 +1888,15 @@ function renderDocDetail(type, id){
     <button class="btn btn-outline btn-block" onclick="genPDF('invoice','${doc.id}')">⤓ 生成 PDF</button>
   </div>
   <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="duplicateDoc('invoice','${doc.id}')">📋 复制这张账单，建一张新的 Duplicate this invoice</div>
-  <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="genPDF('invoice','${doc.id}','inline')">👁 在这里预览PDF内容 Preview here (works inside Claude)</div>
-  <div class="muted" style="text-align:center; margin:-4px 0 10px; font-size:12px; line-height:1.6;">手机上：PDF会在新页面打开，点分享图标 → 存储到"文件"App 保存<br>On phone: PDF opens in a new tab — tap Share → Save to Files</div>` : `
+  <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="genPDF('invoice','${doc.id}','inline')">👁 在这里预览PDF内容 Preview here (works inside Claude)</div>` : `
   <div class="row" style="gap:8px; margin-bottom:10px;">
     <button class="btn btn-soft btn-block" onclick="setQuoteStatus('${doc.id}','sent')">标记已发送 Sent</button>
-    <button class="btn btn-primary btn-block" onclick="setQuoteStatus('${doc.id}','accepted')">标记已接受 Accepted</button>
   </div>
   <div class="row" style="gap:8px; margin-bottom:10px;">
     <button class="btn btn-outline btn-block" onclick="genPDF('quote','${doc.id}')">⤓ 生成 PDF</button>
     <button class="btn btn-peach btn-block" onclick="convertToInvoice('${doc.id}')">转为账单 To Invoice</button>
   </div>
-  <button class="btn btn-soft btn-block" style="margin-bottom:10px;" onclick="copyQuoteText('${doc.id}')">📋 复制报价内容（可直接贴到WhatsApp）Copy Quote Text</button>
-  <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="duplicateDoc('quote','${doc.id}')">📋 复制这张报价，建一张新的 Duplicate this quote</div>
-  <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="genPDF('quote','${doc.id}','inline')">👁 在这里预览PDF内容 Preview here (works inside Claude)</div>
-  <div class="muted" style="text-align:center; margin:-4px 0 10px; font-size:12px; line-height:1.6;">手机上：PDF会在新页面打开，点分享图标 → 存储到"文件"App 保存<br>On phone: PDF opens in a new tab — tap Share → Save to Files</div>`}
+  <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="genPDF('quote','${doc.id}','inline')">👁 在这里预览PDF内容 Preview here (works inside Claude)</div>`}
   <div class="row" style="gap:8px; margin-bottom:14px;">
     <button class="btn btn-soft btn-block" onclick="openDocForm('${type}','${doc.id}')">✏️ 编辑</button>
     <button class="btn btn-danger btn-block" onclick="deleteDoc('${type}','${doc.id}')">删除</button>
