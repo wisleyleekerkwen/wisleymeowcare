@@ -2627,15 +2627,32 @@ function genPDF(type, id, mode){
       toast('PDF 已在新页面打开 📄');
       return;
     }
-    try{
-      pdf.save(`${doc.no}.pdf`);
-      toast('PDF 已生成，可分享啦 📄');
-    }catch(saveErr){
-      console.error('pdf.save failed, falling back to new tab:', saveErr);
+    const fileName = `${doc.no}.pdf`;
+    (async ()=>{
+      let shared = false;
+      try{
+        const pdfBlob = pdf.output('blob');
+        const pdfFile = new File([pdfBlob], fileName, {type:'application/pdf'});
+        if(navigator.canShare && navigator.canShare({files:[pdfFile]})){
+          await navigator.share({files:[pdfFile], title: fileName, text: ' '});
+          toast('PDF 已分享 📄');
+          shared = true;
+        } else {
+          console.log('navigator.canShare with files not supported here — falling back to opening the PDF directly.');
+        }
+      }catch(shareErr){
+        if(shareErr && shareErr.name==='AbortError') return; // user cancelled the share sheet
+        console.error('navigator.share failed, falling back to opening the PDF directly:', shareErr);
+      }
+      if(shared) return;
+      // navigator.share (with files) isn't available in this browser — this is common on
+      // some Safari versions. pdf.save() is unreliable here too (Safari doesn't support the
+      // download attribute, so it silently just opens the PDF anyway) — so skip straight to
+      // opening it, with clear instructions for how to get a real, properly-shareable file.
       const blobUrl = pdf.output('bloburl');
       window.open(blobUrl, '_blank');
-      toast('PDF 已在新页面打开，长按/右键即可保存 📄');
-    }
+      toast('PDF 已在新页面打开：点右上角的分享图标 → 选"存储到文件 Save to Files"保存，再从"文件"App分享给客户（直接分享这个网页链接是无效的）📄');
+    })();
   }).catch((err)=>{
     if(document.body.contains(wrap)) document.body.removeChild(wrap);
     if(preOpenedWindow && !preOpenedWindow.closed){ try{ preOpenedWindow.close(); }catch(e){} }
