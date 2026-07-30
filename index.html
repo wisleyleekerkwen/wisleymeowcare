@@ -1633,7 +1633,7 @@ function updateDocDateRangeFromVisits(){
   const startEl = document.getElementById('f_doc_start'), endEl = document.getElementById('f_doc_end');
   if(dates.length){ if(startEl) startEl.value = dates[0]; if(endEl) endEl.value = dates[dates.length-1]; }
   const cctvDaysInput = document.getElementById('f_doc_cctv_days');
-  if(cctvDaysInput) cctvDaysInput.value = dates.length;
+  if(cctvDaysInput) cctvDaysInput.value = dates.length? daysBetweenInclusive(dates[0], dates[dates.length-1]) : 0;
 }
 function regenerateVisits(){
   const start = val('f_doc_start'), end = val('f_doc_end');
@@ -1857,7 +1857,7 @@ function renderDocDetail(type, id){
   <div class="card">
     <div class="row"><h2 style="margin:0;">${doc.no}</h2>${statusPill}</div>
     <div class="muted" style="margin-top:4px;">客户：${c?c.name:(doc.leadName||'—')} ${c&&c.phone?('· '+c.phone):(doc.leadPhone?('· '+doc.leadPhone):'')}</div>
-    <div class="muted">服务日期：${doc.startDate||'—'} ~ ${doc.endDate||'—'}（${daysBetweenInclusive(doc.startDate,doc.endDate)}天） · 时间段：${doc.timeSlot||'—'}</div>
+    <div class="muted">服务日期：${doc.startDate||'—'} ~ ${doc.endDate||'—'}（${(doc.visits||[]).length}天） · 时间段：${doc.timeSlot||'—'}</div>
     <div class="divider"></div>
     <table class="simple"><tr><th>日期</th><th>星期</th><th>时间段</th><th>价格</th></tr>
     ${(doc.visits||[]).map(v=>`<tr><td>${v.date}<div class="muted" style="font-size:11px; white-space:pre-line;">${visitRemarksText(v)}</div></td><td>${dowLabel(v.date)}</td><td>${v.timeSlot||''}</td><td>${fmt(v.price)}</td></tr>`).join('')}
@@ -1919,9 +1919,8 @@ function copyQuoteText(id){
   const isEN = state.lang === 'en';
   const total = docTotal(doc);
   const dep = depositAmt(doc);
-  const totalDays = daysBetweenInclusive(doc.startDate, doc.endDate);
+  const totalDays = (doc.visits||[]).length;
   const perVisit = (doc.visits&&doc.visits[0])? doc.visits[0].price : 0;
-  const km = (c&&c.km) || (doc.route&&doc.route.distanceKm) || 0;
   const included = (DB.settings.taskOptions||[]).filter(t=>{
     const low = t.toLowerCase();
     return !low.includes('medication') && !low.includes('喂药') && !low.includes('grooming') && !low.includes('梳毛');
@@ -2395,7 +2394,7 @@ function genPDF(type, id, mode){
   const discountTotal = discountAmt(doc);
   const total = docTotal(doc);
   const dep = depositAmt(doc);
-  const totalDays = daysBetweenInclusive(doc.startDate, doc.endDate);
+  const totalDays = (doc.visits||[]).length;
   const catCount = doc.catCount || pets.length || 1;
   const km = c.km || (doc.route && doc.route.distanceKm) || 0;
   const est = km? suggestedPrice(km, catCount) : null;
