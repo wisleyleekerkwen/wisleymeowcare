@@ -541,14 +541,14 @@ function monthlyFinancials(basis){
   const map = {};
   function ensure(m){ if(!map[m]) map[m]={income:0, expense:0}; return map[m]; }
   if(basis==='cash'){
-    DB.invoices.forEach(inv=>{
+    DB.invoices.filter(inv=>!inv.cancelled).forEach(inv=>{
       (inv.payments||[]).forEach(p=>{
         const m=(p.date||'').slice(0,7); if(!m) return;
         ensure(m).income += Number(p.amount)||0;
       });
     });
   } else {
-    DB.invoices.forEach(inv=>{
+    DB.invoices.filter(inv=>!inv.cancelled).forEach(inv=>{
       (inv.visits||[]).forEach(v=>{
         const m=(v.date||'').slice(0,7); if(!m) return;
         ensure(m).income += Number(v.price)||0;
@@ -583,7 +583,7 @@ function renderToday(){
   const totalClients = DB.clients.length;
   const totalCats = DB.clients.reduce((s,c)=> s+(c.pets||[]).length, 0);
   let outstanding=0;
-  DB.invoices.forEach(inv=>{ const paid=(inv.payments||[]).reduce((s,p)=>s+Number(p.amount),0); const tot=docTotal(inv); if(tot-paid>0.001) outstanding += (tot-paid); });
+  DB.invoices.filter(inv=>!inv.cancelled).forEach(inv=>{ const paid=(inv.payments||[]).reduce((s,p)=>s+Number(p.amount),0); const tot=docTotal(inv); if(tot-paid>0.001) outstanding += (tot-paid); });
 
   const upcoming = getUpcomingCatDates(30);
 
@@ -648,7 +648,7 @@ function niceDate(s){ const d=new Date(s+'T00:00:00'); return d.toLocaleDateStri
 
 function getMonthBookedDates(year, month){
   const set = new Set();
-  DB.invoices.forEach(inv=> (inv.visits||[]).forEach(v=>{
+  DB.invoices.filter(inv=>!inv.cancelled).forEach(inv=> (inv.visits||[]).forEach(v=>{
     if(!v.date) return;
     const d = new Date(v.date+'T00:00:00');
     if(d.getFullYear()===year && d.getMonth()===month) set.add(v.date);
@@ -657,7 +657,7 @@ function getMonthBookedDates(year, month){
 }
 function getMonthVisitCounts(year, month){
   const counts = {};
-  DB.invoices.forEach(inv=> (inv.visits||[]).forEach(v=>{
+  DB.invoices.filter(inv=>!inv.cancelled).forEach(inv=> (inv.visits||[]).forEach(v=>{
     if(!v.date) return;
     const d = new Date(v.date+'T00:00:00');
     if(d.getFullYear()===year && d.getMonth()===month) counts[v.date] = (counts[v.date]||0) + 1;
@@ -1039,7 +1039,7 @@ function openHighlightsGenerator(){
   const monthPrefix = now.toISOString().slice(0,7);
   const visitsByClient = {};
   let totalThisMonth = 0;
-  DB.invoices.forEach(inv=>{
+  DB.invoices.filter(inv=>!inv.cancelled).forEach(inv=>{
     const c = DB.clients.find(x=>x.id===inv.clientId);
     if(!c) return;
     (inv.visits||[]).forEach(v=>{
@@ -1201,7 +1201,7 @@ function cancelInvoiceToCredit(invId){
 }
 function clientStats(c){
   const invs = DB.invoices.filter(i=>i.clientId===c.id);
-  const revenue = invs.reduce((s,i)=> s + (i.payments||[]).reduce((s2,p)=>s2+Number(p.amount),0), 0);
+  const revenue = invs.filter(i=>!i.cancelled).reduce((s,i)=> s + (i.payments||[]).reduce((s2,p)=>s2+Number(p.amount),0), 0);
   const serviceCount = invs.filter(i=>!i.cancelled).reduce((s,i)=>s+((i.visits||[]).length),0);
   const exps = DB.expenses.filter(e=>e.clientId===c.id);
   const hasParking = exps.some(e=>e.category==='停车');
@@ -1570,7 +1570,7 @@ function renderDocList(type){
     const filterBar = `<div class="row" style="gap:6px; margin-bottom:12px; overflow-x:auto; flex-wrap:nowrap;">
       ${filterChips.map(([k,l])=>`<div class="subchip ${filter===k?'active':''}" style="flex:none; white-space:nowrap;" onclick="window.__invFilter='${k}'; render();">${l}</div>`).join('')}
     </div>`;
-    const outstanding = list.reduce((s,i)=>{ const t=docTotal(i); const p=(i.payments||[]).reduce((a,b)=>a+Number(b.amount),0); return s+Math.max(t-p,0); },0);
+    const outstanding = list.filter(i=>!i.cancelled).reduce((s,i)=>{ const t=docTotal(i); const p=(i.payments||[]).reduce((a,b)=>a+Number(b.amount),0); return s+Math.max(t-p,0); },0);
     return `
     ${searchBox}
     ${filterBar}
@@ -2652,7 +2652,7 @@ function renderReportsFinance(){
   let incomeRows = '';
   if(basis==='cash'){
     const paymentsInMonth = [];
-    DB.invoices.forEach(inv=>{
+    DB.invoices.filter(inv=>!inv.cancelled).forEach(inv=>{
       const c = DB.clients.find(x=>x.id===inv.clientId);
       (inv.payments||[]).forEach(p=>{
         if((p.date||'').slice(0,7)===sel) paymentsInMonth.push({date:p.date, amount:p.amount, client:c?c.name:(inv.leadName||'—'), invNo:inv.no, invId:inv.id});
@@ -2665,7 +2665,7 @@ function renderReportsFinance(){
       </div>`).join('') : `<div class="muted" style="padding:6px 4px 16px;">这个月还没有收款记录 No payments this month</div>`;
   } else {
     const visitsInMonth = [];
-    DB.invoices.forEach(inv=>{
+    DB.invoices.filter(inv=>!inv.cancelled).forEach(inv=>{
       const c = DB.clients.find(x=>x.id===inv.clientId);
       (inv.visits||[]).forEach(v=>{
         if((v.date||'').slice(0,7)===sel) visitsInMonth.push({date:v.date, amount:v.price, client:c?c.name:(inv.leadName||'—'), invNo:inv.no, invId:inv.id, visitId:v.id});
@@ -2713,11 +2713,11 @@ function renderReportsFinance(){
   </div>
   ${(()=>{
     const projectedList = [];
-    DB.invoices.forEach(inv=>{
-      const total = docTotal(inv);
-      const paid = (inv.payments||[]).reduce((s,p)=>s+Number(p.amount),0);
-      const remaining = total - paid;
-      if(remaining > 0.01 && inv.endDate){
+    DB.invoices.filter(inv=>!inv.cancelled).forEach(inv=>{
+        const total = docTotal(inv);
+        const paid = (inv.payments||[]).reduce((s,p)=>s+Number(p.amount),0);
+        const remaining = total - paid;
+        if(remaining > 0.01 && inv.endDate){
         const c = DB.clients.find(x=>x.id===inv.clientId);
         projectedList.push({date: inv.endDate, amount: remaining, client: c?c.name:(inv.leadName||'—'), invNo: inv.no, invId: inv.id});
       }
@@ -3288,6 +3288,7 @@ function exportToExcel(){
       const total = docTotal(inv); const paid=(inv.payments||[]).reduce((s,p)=>s+Number(p.amount),0);
       return {
         '账单号 No': inv.no, '客户 Client': c?c.name:(inv.leadName||''), '开始日期 Start': inv.startDate, '结束日期 End': inv.endDate,
+        '状态 Status': inv.cancelled? '已取消 Cancelled' : '正常 Active',
         '总额 Total': total, '已付 Paid': paid, '剩余 Remaining': Math.max(total-paid,0), '备注 Notes': inv.notes||'',
       };
     });
