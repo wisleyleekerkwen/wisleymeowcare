@@ -1079,15 +1079,10 @@ function downloadHighlightsImage(){
       <div style="font-size:18px; color:#9C8F7E; margin-bottom:6px;">本月共服务</div>
       <div style="font-size:56px; font-weight:800; color:#8CA891; font-family:Fredoka,sans-serif;">${totalThisMonth} 次</div>
     </div>
-    ${topClients.length? `
-    <div style="background:#fff; border-radius:24px; padding:28px 36px; width:100%; margin-bottom:20px;">
-      <div style="font-size:18px; color:#9C8F7E; margin-bottom:14px;">💛 本月常客 Top Clients</div>
-      ${topClients.map((t,i)=>`<div style="display:flex; justify-content:space-between; font-size:22px; font-weight:700; color:#3E362C; padding:6px 0;"><span>${['🥇','🥈','🥉'][i]} ${t.c.name}</span><span>${t.count} 次</span></div>`).join('')}
-    </div>` : ''}
     ${milestoneClients.length? `
     <div style="background:#FCEBDD; border-radius:24px; padding:24px 36px; width:100%;">
       <div style="font-size:18px; color:#E68A57; font-weight:800;">🎁 即将获得定制猫咪钥匙扣</div>
-      <div style="font-size:20px; color:#3E362C; margin-top:8px;">${milestoneClients.map(x=>x.c.name).join(' · ')}</div>
+      <div style="font-size:20px; color:#3E362C; margin-top:8px;">本月有 ${milestoneClients.length} 位客户达成 10 次服务里程碑</div>
     </div>` : ''}
     <div style="margin-top:auto; font-size:16px; color:#8CA891; font-weight:700; padding-top:24px;">感谢每一位主人的信任 🐾 Thank you for trusting us</div>
   `;
