@@ -1039,11 +1039,12 @@ function openHighlightsGenerator(){
   const monthPrefix = now.toISOString().slice(0,7);
   const visitsByClient = {};
   let totalThisMonth = 0;
+  const t = todayStr();
   DB.invoices.filter(inv=>!inv.cancelled).forEach(inv=>{
     const c = DB.clients.find(x=>x.id===inv.clientId);
     if(!c) return;
     (inv.visits||[]).forEach(v=>{
-      if((v.date||'').slice(0,7)===monthPrefix){
+      if((v.date||'').slice(0,7)===monthPrefix && v.date<=t){
         totalThisMonth++;
         visitsByClient[c.id] = (visitsByClient[c.id]||0) + 1;
       }
@@ -1066,13 +1067,6 @@ function openHighlightsGenerator(){
 function downloadHighlightsImage(){
   const {monthPrefix, totalThisMonth, topClients, milestoneClients} = window.__highlightsData;
   const [y,mo] = monthPrefix.split('-');
-  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  const mode = HAS_CLAUDE_STORAGE ? 'inline' : (isMobile ? 'view' : undefined);
-  let preOpenedWindow = null;
-  if(mode==='view'){
-    preOpenedWindow = window.open('', '_blank');
-    if(preOpenedWindow) preOpenedWindow.document.write('<body style="font-family:sans-serif; padding:24px; color:#888;">正在生成图片…</body>');
-  }
   toast('正在生成图片…');
 
   const wrap = document.createElement('div');
@@ -1111,28 +1105,19 @@ function downloadHighlightsImage(){
 
   waitForImages.then(()=> html2canvas(wrap, {scale:1.5, backgroundColor:'#FBF6EE', useCORS:true})).then(canvas=>{
     document.body.removeChild(wrap);
-    const dataUrl = canvas.toDataURL('image/png');
-    if(mode==='inline'){
+    canvas.toBlob(blob=>{
+      const fileName = `${DB.settings.businessName}-${monthPrefix}-highlights.png`;
+      const file = new File([blob], fileName, {type:'image/png'});
+      window.__preparedShare = { file, fileName };
+      const dataUrl = canvas.toDataURL('image/png');
       openModal(`
-        <div class="modalhead"><h2>亮点图预览 Preview</h2><button class="closex" onclick="closeModal()">✕</button></div>
-        <div class="muted" style="margin-bottom:10px; font-size:12.5px;">Claude对话框里无法真正下载，托管到网页后用真实浏览器打开可以正常下载/长按保存。</div>
-        <img src="${dataUrl}" style="width:100%; border-radius:12px;">
+        <div class="modalhead"><h2>亮点图 Ready</h2><button class="closex" onclick="closeModal()">✕</button></div>
+        <img src="${dataUrl}" style="width:100%; border-radius:12px; margin-bottom:14px;">
+        <button class="btn btn-primary btn-block" onclick="shareFile()">📤 分享 / 保存 Share</button>
       `);
-      return;
-    }
-    if(mode==='view'){
-      if(preOpenedWindow && !preOpenedWindow.closed){ preOpenedWindow.location.href = dataUrl; }
-      else { window.open(dataUrl, '_blank'); }
-      toast('图片已生成，长按保存 ✨');
-      return;
-    }
-    const a = document.createElement('a');
-    a.href = dataUrl; a.download = `${DB.settings.businessName}-${monthPrefix}-highlights.png`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    toast('图片已下载 ✨');
+    }, 'image/png');
   }).catch(err=>{
     if(document.body.contains(wrap)) document.body.removeChild(wrap);
-    if(preOpenedWindow && !preOpenedWindow.closed){ try{ preOpenedWindow.close(); }catch(e){} }
     console.error('Highlights image generation failed:', err);
     toast('生成失败 Failed: '+(err&&err.message?err.message.slice(0,60):''));
   });
@@ -1202,7 +1187,8 @@ function cancelInvoiceToCredit(invId){
 function clientStats(c){
   const invs = DB.invoices.filter(i=>i.clientId===c.id);
   const revenue = invs.filter(i=>!i.cancelled).reduce((s,i)=> s + (i.payments||[]).reduce((s2,p)=>s2+Number(p.amount),0), 0);
-  const serviceCount = invs.filter(i=>!i.cancelled).reduce((s,i)=>s+((i.visits||[]).length),0);
+  const t = todayStr();
+  const serviceCount = invs.filter(i=>!i.cancelled).reduce((s,i)=>s+((i.visits||[]).filter(v=>v.date && v.date<=t).length),0);
   const exps = DB.expenses.filter(e=>e.clientId===c.id);
   const hasParking = exps.some(e=>e.category==='停车');
   const hasHighway = exps.some(e=>e.category==='过路费');
@@ -1513,7 +1499,7 @@ function renderMoney(){
 }
 
 /* ---- shared invoice/quote model ---- */
-function totalServiceCount_(){ return DB.invoices.filter(inv=>!inv.cancelled).reduce((s,inv)=> s+(inv.visits||[]).length, 0); }
+function totalServiceCount_(){ const t=todayStr(); return DB.invoices.filter(inv=>!inv.cancelled).reduce((s,inv)=> s+(inv.visits||[]).filter(v=>v.date && v.date<=t).length, 0); }
 function docSubtotal(doc){
   const visitsTotal = (doc.visits||[]).reduce((s,v)=>s+(Number(v.price)||0),0);
   const cctvTotal = (doc.cctv && doc.cctv.needed) ? (Number(doc.cctv.days)||0)*(Number(doc.cctv.rate)||0) : 0;
