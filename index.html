@@ -1165,6 +1165,40 @@ function renderClientList(){
   `;
 }
 function openClient(id){ state.clientId=id; render(); }
+function adjustCreditBalance(clientId){
+  const c = DB.clients.find(x=>x.id===clientId); if(!c) return;
+  openModal(`
+    <div class="modalhead"><h2>调整客户余额 Adjust Credit Balance</h2><button class="closex" onclick="closeModal()">✕</button></div>
+    <div class="muted" style="margin-bottom:10px;">当前余额 Current balance: <b>${fmt(c.creditBalance||0)}</b></div>
+    <label class="flabel">金额变动 Amount（正数增加，负数减少 positive to add, negative to subtract）</label>
+    <input type="number" id="f_credit_amt" placeholder="例如 80 或 -20">
+    <label class="flabel">备注 Note（可选）</label>
+    <input id="f_credit_note" placeholder="例如：取消服务转余额">
+    <button class="btn btn-primary btn-block" onclick="saveCreditAdjust('${clientId}')">保存</button>
+  `);
+}
+function saveCreditAdjust(clientId){
+  const c = DB.clients.find(x=>x.id===clientId); if(!c) return;
+  const amt = Number(val('f_credit_amt'));
+  if(!amt){ toast('请输入金额'); return; }
+  c.creditBalance = (c.creditBalance||0) + amt;
+  if(!c.creditLog) c.creditLog = [];
+  c.creditLog.push({date: todayStr(), amount: amt, note: val('f_credit_note').trim()});
+  save('clients'); closeModal(); render(); toast('余额已更新 🎁');
+}
+function cancelInvoiceToCredit(invId){
+  const inv = DB.invoices.find(x=>x.id===invId); if(!inv) return;
+  const c = DB.clients.find(x=>x.id===inv.clientId); if(!c) return;
+  const paid = (inv.payments||[]).reduce((s,p)=>s+Number(p.amount),0);
+  confirmAction(`确定取消这张账单吗？已付的 ${fmt(paid)} 会转入客户余额，下次服务时可以抵扣。`, ()=>{
+    c.creditBalance = (c.creditBalance||0) + paid;
+    if(!c.creditLog) c.creditLog = [];
+    c.creditLog.push({date: todayStr(), amount: paid, note: `取消账单 ${inv.no}`});
+    inv.cancelled = true;
+    save('clients'); save('invoices'); render();
+    toast(`已取消，${fmt(paid)} 已转入客户余额 🎁`);
+  });
+}
 function clientStats(c){
   const invs = DB.invoices.filter(i=>i.clientId===c.id);
   const revenue = invs.reduce((s,i)=> s + (i.payments||[]).reduce((s2,p)=>s2+Number(p.amount),0), 0);
@@ -1206,6 +1240,17 @@ function renderClientDetail(id){
   <div class="statgrid" style="margin-bottom:14px;">
     <div class="statcard"><div class="v">${st.serviceCount}</div><div class="l">服务次数</div></div>
     <div class="statcard"><div class="v" style="color:var(--sage-dark)">${fmt(st.revenue)}</div><div class="l">累计收入</div></div>
+  </div>
+
+  <div class="card" style="background:#F4ECDF;">
+    <div class="row">
+      <div>
+        <h3 style="margin:0;">🎁 客户余额 Credit Balance</h3>
+        <div class="muted" style="font-size:11.5px; margin-top:2px;">取消服务但已收款时，可以把款项留在这里，下次服务时抵扣</div>
+      </div>
+      <div style="font-size:20px; font-weight:800; color:var(--sage-dark); white-space:nowrap;">${fmt(c.creditBalance||0)}</div>
+    </div>
+    <button class="btn btn-soft btn-block" style="margin-top:10px;" onclick="adjustCreditBalance('${c.id}')">调整余额 Adjust Balance</button>
   </div>
 
   ${st.serviceCount>=10? `
@@ -1482,10 +1527,11 @@ function discountAmt(doc){
   return Math.max(0, Math.min(raw, sub));
 }
 function docTotal(doc){
-  return docSubtotal(doc) - discountAmt(doc);
+  return Math.max(0, docSubtotal(doc) - discountAmt(doc) - (Number(doc.creditApplied)||0));
 }
 function depositAmt(doc){ return docTotal(doc) * (Number(doc.depositPercent)||50) / 100; }
 function invStatus(inv){
+  if(inv.cancelled) return {label:'已取消 Cancelled', cls:'gray'};
   const paid = (inv.payments||[]).reduce((s,p)=>s+Number(p.amount),0);
   const total = docTotal(inv);
   if(paid >= total - 0.001 && total>0) return {label:'已付清', cls:'green'};
@@ -1571,7 +1617,7 @@ function openDocForm(type, id){
   openModal(`
   <div class="modalhead"><h2>${doc? (type==='invoice'?'编辑账单':'编辑报价') : (type==='invoice'?'新建账单':'新建报价')}</h2><button class="closex" onclick="closeModal()">✕</button></div>
   ${type==='invoice'? `
-  <label class="flabel">客户</label><select id="f_doc_client" onchange="window.__docClientId=this.value;">${clientOpts||'<option value="">请先添加客户</option>'}</select>
+  <label class="flabel">客户</label><select id="f_doc_client" onchange="window.__docClientId=this.value; document.getElementById('docCreditWrap').innerHTML=docCreditHTML(null);">${clientOpts||'<option value="">请先添加客户</option>'}</select>
   ` : `
   <div class="muted" style="margin-bottom:10px;">报价阶段还不需要选客户 — 等对方确认接受后，再在「转为账单」时登记成正式客户。</div>
   <label class="flabel">客户姓名 / 称呼</label><input id="f_doc_leadname" value="${doc?doc.leadName||'':''}" placeholder="例如：Lacey">
@@ -1648,6 +1694,8 @@ function openDocForm(type, id){
     </div>
   </div>
 
+  <div id="docCreditWrap">${docCreditHTML(doc)}</div>
+
   <label class="flabel">定金比例 (%)</label><input type="number" id="f_doc_deposit" value="${doc?doc.depositPercent!=null?doc.depositPercent:DB.settings.depositPercent:DB.settings.depositPercent}">
   <label class="flabel">备注</label><textarea id="f_doc_notes" placeholder="给客户的附加备注">${doc?doc.notes||'':''}</textarea>
   <button class="btn btn-primary btn-block" onclick="saveDoc('${type}','${id||''}')">保存${type==='invoice'?'账单':'报价'}</button>
@@ -1665,6 +1713,19 @@ function getClientById(id){ return DB.clients.find(x=>x.id===id); }
 function toggleCctvFields(){ document.getElementById('cctvFields').style.display = document.getElementById('f_doc_cctv_needed').checked? 'block':'none'; }
 function toggleHolidayFeeFields(){ document.getElementById('holidayFeeFields').style.display = document.getElementById('f_doc_holiday_needed').checked? 'block':'none'; }
 function toggleDiscountFields(){ document.getElementById('discountFields').style.display = document.getElementById('f_doc_discount_needed').checked? 'block':'none'; }
+function docCreditHTML(doc){
+  if(window.__docType!=='invoice') return '';
+  const c = DB.clients.find(x=>x.id===window.__docClientId);
+  if(!c) return '';
+  const already = doc? (Number(doc.creditApplied)||0) : 0;
+  const avail = (c.creditBalance||0) + already;
+  if(avail<=0) return '';
+  return `<div class="card" style="background:#F4ECDF; margin-bottom:14px;">
+    <div class="row"><span style="font-weight:800; font-size:13px;">🎁 客户余额 Available Credit</span><span style="font-weight:800; color:var(--sage-dark);">${fmt(avail)}</span></div>
+    <label class="flabel">使用余额抵扣 Apply Credit (RM)</label>
+    <input type="number" id="f_doc_credit_apply" value="${already||''}" max="${avail}" placeholder="最多 ${fmt(avail)}">
+  </div>`;
+}
 function docCalendarHTML(){
   const m = window.__docCalMonth || new Date();
   const year = m.getFullYear(), month = m.getMonth();
@@ -1946,6 +2007,20 @@ function saveDoc(type, id){
     depositPercent: Number(val('f_doc_deposit'))||50,
     notes: val('f_doc_notes').trim(),
   });
+  if(type==='invoice'){
+    const client = DB.clients.find(x=>x.id===data.clientId);
+    const existingDoc = id? DB.invoices.find(x=>x.id===id) : null;
+    const oldApplied = existingDoc? (Number(existingDoc.creditApplied)||0) : 0;
+    const creditInput = document.getElementById('f_doc_credit_apply');
+    let newApplied = creditInput? Math.max(0, Number(creditInput.value)||0) : 0;
+    if(client){
+      const availBeforeThisDoc = (client.creditBalance||0) + oldApplied;
+      newApplied = Math.min(newApplied, availBeforeThisDoc);
+      client.creditBalance = availBeforeThisDoc - newApplied;
+      save('clients');
+    } else { newApplied = 0; }
+    data.creditApplied = newApplied;
+  }
   const list = type==='invoice'? DB.invoices : DB.quotes;
   if(id){ Object.assign(list.find(x=>x.id===id), data); }
   else {
@@ -2179,6 +2254,7 @@ function renderDocDetail(type, id){
     <div class="divider"></div>
     ${discountOn? `<div class="totalline"><span>小计</span><span>${fmt(subtotal)}</span></div>
     <div class="totalline" style="color:var(--danger);"><span>🏷️ 折扣 Discount ${doc.discount.type==='percent'?`(${doc.discount.amount}%)`:''}</span><span>-${fmt(discountTotal)}</span></div>` : ''}
+    ${(doc.creditApplied>0)? `<div class="totalline" style="color:var(--sage-dark);"><span>🎁 使用余额抵扣 Credit Applied</span><span>-${fmt(doc.creditApplied)}</span></div>` : ''}
     <div class="totalline big"><span>总额</span><span>${fmt(total)}</span></div>
     <div class="totalline" style="color:var(--peach-dark);"><span>定金 (${doc.depositPercent||50}%)</span><span>${fmt(dep)}</span></div>
     <div class="totalline"><span>尾款</span><span>${fmt(total-dep)}</span></div>
@@ -2200,7 +2276,8 @@ function renderDocDetail(type, id){
     <button class="btn btn-outline btn-block" onclick="genPDF('invoice','${doc.id}')">⤓ 生成 PDF</button>
   </div>
   <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="duplicateDoc('invoice','${doc.id}')">📋 复制这张账单，建一张新的 Duplicate this invoice</div>
-  <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="genPDF('invoice','${doc.id}','inline')">👁 在这里预览PDF内容 Preview here (works inside Claude)</div>` : `
+  <div class="muted" style="text-align:center; margin:-4px 0 10px; cursor:pointer; color:var(--sage-dark); font-weight:800; font-size:12px;" onclick="genPDF('invoice','${doc.id}','inline')">👁 在这里预览PDF内容 Preview here (works inside Claude)</div>
+  ${(!doc.cancelled && (doc.payments||[]).length)? `<button class="btn btn-soft btn-block" style="margin-bottom:10px;" onclick="cancelInvoiceToCredit('${doc.id}')">🎁 取消服务，已付款转为客户余额 Cancel & Credit Client</button>` : ''}` : `
   <div class="row" style="gap:8px; margin-bottom:10px;">
     <button class="btn btn-soft btn-block" onclick="setQuoteStatus('${doc.id}','sent')">标记已发送 Sent</button>
   </div>
