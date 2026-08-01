@@ -738,20 +738,13 @@ function downloadCalendarImage(){
   const cells = []; for(let i=0;i<startDow;i++) cells.push(null); for(let d=1; d<=daysInMonth; d++) cells.push(d);
   const dowLabels = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
 
-  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  const mode = HAS_CLAUDE_STORAGE ? 'inline' : (isMobile ? 'view' : undefined);
-  let preOpenedWindow = null;
-  if(mode==='view'){
-    preOpenedWindow = window.open('', '_blank');
-    if(preOpenedWindow) preOpenedWindow.document.write('<body style="font-family:sans-serif; padding:24px; color:#888;">正在生成图片…</body>');
-  }
   toast('正在生成图片…');
 
   const statusBg = {open:'#F4ECDF', limited:'#F4D58D', full:'#D97066'};
   const statusFg = {open:'#3E362C', limited:'#3E362C', full:'#fff'};
 
   const wrap = document.createElement('div');
-  wrap.style.cssText = 'position:fixed; left:-9999px; top:0; width:1080px; height:1080px; background:#FBF6EE; padding:60px; font-family:Nunito,sans-serif; box-sizing:border-box; display:flex; flex-direction:column;';
+  wrap.style.cssText = 'position:fixed; left:-9999px; top:0; width:1080px; height:1080px; background:#FBF6EE; padding:60px; font-family:Nunito,sans-serif; box-sizing:border-box;';
   wrap.innerHTML = `
     <div style="display:flex; align-items:center; gap:16px; margin-bottom:24px;">
       <img src="${LOGO_B64}" style="width:64px;height:64px;border-radius:16px;object-fit:cover;">
@@ -761,17 +754,19 @@ function downloadCalendarImage(){
       </div>
     </div>
     <div style="text-align:center; font-size:44px; font-weight:800; color:#3E362C; font-family:Fredoka,sans-serif; margin-bottom:24px;">${year} 年 ${month+1} 月</div>
-    <div style="display:grid; grid-template-columns:repeat(7,1fr); gap:8px; flex:1;">
-      ${dowLabels.map(l=>`<div style="text-align:center; font-weight:800; color:#9C8F7E; font-size:15px; padding-bottom:6px;">${l}</div>`).join('')}
+    <div style="display:flex; flex-wrap:wrap;">
+      ${dowLabels.map(l=>`<div style="width:14.2857%; box-sizing:border-box; text-align:center; font-weight:800; color:#9C8F7E; font-size:15px; padding-bottom:6px;">${l}</div>`).join('')}
       ${cells.map(d=>{
-        if(!d) return `<div></div>`;
+        if(!d) return `<div style="width:14.2857%; box-sizing:border-box; padding:4px;"></div>`;
         const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
         const count = counts[ds]||0;
         const status = dayStatus(ds, count, holidayMap);
         const hname = holidayMap[ds];
-        return `<div style="aspect-ratio:1; border-radius:12px; background:${statusBg[status]}; display:flex; flex-direction:column; align-items:center; justify-content:center; position:relative;">
-          <div style="font-size:20px; font-weight:800; color:${statusFg[status]};">${d}</div>
-          ${hname? `<div style="font-size:8px; color:${status==='open'?'#8CA891':statusFg[status]}; text-align:center; padding:0 2px; font-weight:700;">🎉${hname.length>10?hname.slice(0,9)+'…':hname}</div>`:''}
+        return `<div style="width:14.2857%; box-sizing:border-box; padding:4px;">
+          <div style="width:100%; aspect-ratio:1; border-radius:12px; background:${statusBg[status]}; display:flex; flex-direction:column; align-items:center; justify-content:center; position:relative;">
+            <div style="font-size:20px; font-weight:800; color:${statusFg[status]};">${d}</div>
+            ${hname? `<div style="font-size:8px; color:${status==='open'?'#8CA891':statusFg[status]}; text-align:center; padding:0 2px; font-weight:700;">🎉${hname.length>10?hname.slice(0,9)+'…':hname}</div>`:''}
+          </div>
         </div>`;
       }).join('')}
     </div>
@@ -796,28 +791,19 @@ function downloadCalendarImage(){
 
   waitForImages.then(()=> html2canvas(wrap, {scale:1.5, backgroundColor:'#FBF6EE', useCORS:true})).then(canvas=>{
     document.body.removeChild(wrap);
-    const dataUrl = canvas.toDataURL('image/png');
-    if(mode==='inline'){
+    canvas.toBlob(blob=>{
+      const fileName = `${DB.settings.businessName}-${year}-${month+1}-calendar.png`;
+      const file = new File([blob], fileName, {type:'image/png'});
+      window.__preparedShare = { file, fileName };
+      const dataUrl = canvas.toDataURL('image/png');
       openModal(`
-        <div class="modalhead"><h2>月历图预览 Preview</h2><button class="closex" onclick="closeModal()">✕</button></div>
-        <div class="muted" style="margin-bottom:10px; font-size:12.5px;">Claude对话框里无法真正下载，托管到网页后用真实浏览器打开可以正常下载/长按保存。</div>
-        <img src="${dataUrl}" style="width:100%; border-radius:12px;">
+        <div class="modalhead"><h2>月历图 Ready</h2><button class="closex" onclick="closeModal()">✕</button></div>
+        <img src="${dataUrl}" style="width:100%; border-radius:12px; margin-bottom:14px;">
+        <button class="btn btn-primary btn-block" onclick="shareFile()">📤 分享 / 保存 Share</button>
       `);
-      return;
-    }
-    if(mode==='view'){
-      if(preOpenedWindow && !preOpenedWindow.closed){ preOpenedWindow.location.href = dataUrl; }
-      else { window.open(dataUrl, '_blank'); }
-      toast('图片已生成，长按保存 📅');
-      return;
-    }
-    const a = document.createElement('a');
-    a.href = dataUrl; a.download = `${DB.settings.businessName}-${year}-${month+1}-calendar.png`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    toast('图片已下载 📅');
+    }, 'image/png');
   }).catch(err=>{
     if(document.body.contains(wrap)) document.body.removeChild(wrap);
-    if(preOpenedWindow && !preOpenedWindow.closed){ try{ preOpenedWindow.close(); }catch(e){} }
     console.error('Calendar image generation failed:', err);
     toast('生成失败 Failed: '+(err&&err.message?err.message.slice(0,60):''));
   });
