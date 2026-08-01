@@ -744,7 +744,7 @@ function downloadCalendarImage(){
   const statusFg = {open:'#3E362C', limited:'#3E362C', full:'#fff'};
 
   const wrap = document.createElement('div');
-  wrap.style.cssText = 'position:fixed; left:-9999px; top:0; width:1080px; height:1080px; background:#FBF6EE; padding:60px; font-family:Nunito,sans-serif; box-sizing:border-box;';
+  wrap.style.cssText = 'position:fixed; left:-9999px; top:0; width:1080px; background:#FBF6EE; padding:60px; font-family:Nunito,sans-serif; box-sizing:border-box;';
   wrap.innerHTML = `
     <div style="display:flex; align-items:center; gap:16px; margin-bottom:24px;">
       <img src="${LOGO_B64}" style="width:64px;height:64px;border-radius:16px;object-fit:cover;">
@@ -1021,8 +1021,17 @@ function renderSocial(){
   `;
 }
 function openHighlightsGenerator(){
-  const now = new Date();
-  const monthPrefix = now.toISOString().slice(0,7);
+  if(!window.__highlightsMonth) window.__highlightsMonth = new Date();
+  openModal(highlightsModalHTML());
+}
+function shiftHighlightsMonth(delta){
+  const m = window.__highlightsMonth;
+  window.__highlightsMonth = new Date(m.getFullYear(), m.getMonth()+delta, 1);
+  document.getElementById('modalCard').innerHTML = highlightsModalHTML();
+}
+function highlightsModalHTML(){
+  const m = window.__highlightsMonth;
+  const monthPrefix = `${m.getFullYear()}-${String(m.getMonth()+1).padStart(2,'0')}`;
   const visitsByClient = {};
   let totalThisMonth = 0;
   const t = todayStr();
@@ -1040,15 +1049,20 @@ function openHighlightsGenerator(){
   const milestoneClients = DB.clients.map(c=>({c, st:clientStats(c)})).filter(x=>x.st.serviceCount>=10 && x.c.keychainStatus!=='sent');
 
   window.__highlightsData = {monthPrefix, totalThisMonth, topClients, milestoneClients};
-  openModal(`
+  return `
   <div class="modalhead"><h2>本月亮点 Monthly Highlights</h2><button class="closex" onclick="closeModal()">✕</button></div>
+  <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:10px;">
+    <button class="btn btn-soft btn-sm" onclick="shiftHighlightsMonth(-1)">‹</button>
+    <div style="font-weight:800;">${m.getFullYear()}年${m.getMonth()+1}月</div>
+    <button class="btn btn-soft btn-sm" onclick="shiftHighlightsMonth(1)">›</button>
+  </div>
   <div class="card" style="margin-bottom:14px;">
     <div class="row" style="padding:4px 0;"><span class="muted">本月总服务次数</span><span style="font-weight:800;">${totalThisMonth}</span></div>
     ${topClients.map((t,i)=>`<div class="row" style="padding:4px 0;"><span class="muted">Top ${i+1}</span><span style="font-weight:800;">${t.c.name} · ${t.count}次</span></div>`).join('')}
     ${milestoneClients.length? `<div class="row" style="padding:4px 0;"><span class="muted">满10次待送礼</span><span style="font-weight:800;">${milestoneClients.map(x=>x.c.name).join('、')}</span></div>`:''}
   </div>
   <button class="btn btn-primary btn-block" onclick="downloadHighlightsImage()">⤓ 下载亮点图 Download Image</button>
-  `);
+  `;
 }
 function downloadHighlightsImage(){
   const {monthPrefix, totalThisMonth, topClients, milestoneClients} = window.__highlightsData;
