@@ -968,7 +968,7 @@ function getUpcomingCatDates(daysAhead){
 }
 function renderSocial(){
   const contentClients = DB.clients.filter(c=> c.socialConsent==='yes');
-  const keychainClients = DB.clients.map(c=>({c, st:clientStats(c)})).filter(x=>x.st.serviceCount>=10);
+  const keychainClients = DB.clients.map(c=>({c, st:clientStats(c)})).filter(x=>x.st.totalBooked>=10);
   return `
   <div class="card" style="margin-bottom:16px; padding:14px;">
     <h3 style="margin:0 0 4px;">📊 Content Performance</h3>
@@ -1046,7 +1046,7 @@ function highlightsModalHTML(){
     });
   });
   const topClients = Object.entries(visitsByClient).map(([id,count])=>({c:DB.clients.find(x=>x.id===id), count})).filter(x=>x.c).sort((a,b)=>b.count-a.count).slice(0,3);
-  const milestoneClients = DB.clients.map(c=>({c, st:clientStats(c)})).filter(x=>x.st.serviceCount>=10 && x.c.keychainStatus!=='sent');
+  const milestoneClients = DB.clients.map(c=>({c, st:clientStats(c)})).filter(x=>x.st.totalBooked>=10 && x.c.keychainStatus!=='sent');
 
   window.__highlightsData = {monthPrefix, totalThisMonth, topClients, milestoneClients};
   return `
@@ -1184,13 +1184,14 @@ function clientStats(c){
   const revenue = invs.filter(i=>!i.cancelled).reduce((s,i)=> s + (i.payments||[]).reduce((s2,p)=>s2+Number(p.amount),0), 0);
   const t = todayStr();
   const serviceCount = invs.filter(i=>!i.cancelled).reduce((s,i)=>s+((i.visits||[]).filter(v=>v.date && v.date<=t).length),0);
+  const totalBooked = invs.filter(i=>!i.cancelled).reduce((s,i)=>s+((i.visits||[]).length),0);
   const exps = DB.expenses.filter(e=>e.clientId===c.id);
   const hasParking = exps.some(e=>e.category==='停车');
   const hasHighway = exps.some(e=>e.category==='过路费');
   const hasPlatform = exps.some(e=>e.category==='平台费');
   const reimbursable = exps.filter(e=>e.reimbursable).reduce((s,e)=>s+Number(e.amount),0);
   const notReimbursable = exps.filter(e=>!e.reimbursable).reduce((s,e)=>s+Number(e.amount),0);
-  return {revenue, serviceCount, hasParking, hasHighway, hasPlatform, reimbursable, notReimbursable, invCount:invs.length};
+  return {revenue, serviceCount, totalBooked, hasParking, hasHighway, hasPlatform, reimbursable, notReimbursable, invCount:invs.length};
 }
 const QA_FIELDS = [
   ['food','🍚 食物放哪里 Where is the food kept'],
@@ -1234,7 +1235,7 @@ function renderClientDetail(id){
     <button class="btn btn-soft btn-block" style="margin-top:10px;" onclick="adjustCreditBalance('${c.id}')">调整余额 Adjust Balance</button>
   </div>
 
-  ${st.serviceCount>=10? `
+  ${st.totalBooked>=10? `
   <div class="card" style="background:#FCEBDD; border:none;">
     <h3>🎁 满10次服务礼品 · 定制猫咪钥匙扣</h3>
     <div class="muted" style="margin-bottom:10px;">已服务 ${st.serviceCount} 次，达到赠送门槛啦</div>
