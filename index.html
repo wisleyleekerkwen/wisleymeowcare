@@ -250,9 +250,9 @@ const DEFAULT_HOLIDAYS = [
   {date:'2027-12-11', name:"Sultan of Selangor's Birthday"},
   {date:'2027-12-25', name:'Christmas Day'},
 ];
-function visitRemarksText(v){
+function visitRemarksText(v, isEN){
   const lines=[];
-  if(v.tasks && v.tasks.length) v.tasks.forEach((t,i)=> lines.push((i+1)+'. '+t));
+  if(v.tasks && v.tasks.length) v.tasks.forEach((t,i)=> lines.push((i+1)+'. '+(isEN? enOnly(t) : t)));
   else if(v.remarks) lines.push(v.remarks);
   if(v.extraNotes) lines.push(v.extraNotes);
   return lines.join('\n');
@@ -416,7 +416,7 @@ function whatsappLink(phone){
   else if(!digits.startsWith('60')) digits = '60' + digits;
   return `https://wa.me/${digits}`;
 }
-function dowLabel(ds){ try{ return new Date(ds+'T00:00:00').toLocaleDateString('zh-CN',{weekday:'long'});}catch(e){return '';} }
+function dowLabel(ds, isEN){ try{ return new Date(ds+'T00:00:00').toLocaleDateString(isEN?'en-US':'zh-CN',{weekday:'long'});}catch(e){return '';} }
 function daysBetweenInclusive(a,b){ if(!a||!b) return 0; const d1=new Date(a+'T00:00:00'), d2=new Date(b+'T00:00:00'); return Math.round((d2-d1)/86400000)+1; }
 
 /* ---------------- pricing calculator ---------------- */
@@ -2804,9 +2804,9 @@ function genPDF(type, id, mode){
   const visitRows = (doc.visits||[]).map(v=>`
     <tr>
       <td style="padding:8px 6px; border-top:1px solid #EDE2D0;">${v.date}</td>
-      <td style="padding:8px 6px; border-top:1px solid #EDE2D0;">${dowLabel(v.date)}</td>
+      <td style="padding:8px 6px; border-top:1px solid #EDE2D0;">${dowLabel(v.date, isEN)}</td>
       <td style="padding:8px 6px; border-top:1px solid #EDE2D0; background:#F4ECDF;">${v.timeSlot||''}</td>
-      <td style="padding:8px 6px; border-top:1px solid #EDE2D0; background:#F4ECDF; white-space:pre-line; font-size:12px;">${visitRemarksText(v).replace(/</g,'&lt;')}</td>
+      <td style="padding:8px 6px; border-top:1px solid #EDE2D0; background:#F4ECDF; white-space:pre-line; font-size:12px;">${visitRemarksText(v, isEN).replace(/</g,'&lt;')}</td>
       <td style="padding:8px 6px; border-top:1px solid #EDE2D0; text-align:right; font-weight:700;">${fmt(v.price)}</td>
     </tr>`).join('');
   const cctvRow = cctvOn? `
@@ -2825,7 +2825,7 @@ function genPDF(type, id, mode){
       <div style="flex:1;">
         <table style="width:100%; font-size:13px; border-collapse:collapse;">
           <tr><td style="color:#9C8F7E; padding:3px 0; width:40%;">Pet Name</td><td style="font-weight:700;">${p.name}</td></tr>
-          <tr><td style="color:#9C8F7E; padding:3px 0;">Gender</td><td>${p.gender||'—'}</td></tr>
+          <tr><td style="color:#9C8F7E; padding:3px 0;">Gender</td><td>${p.gender==='公'?'Male 公':p.gender==='母'?'Female 母':'Unknown 未知'}</td></tr>
           <tr><td style="color:#9C8F7E; padding:3px 0;">Sick/Pregnant?</td><td>${p.sickPregnant==='是'?'Yes 是':'No 否'}</td></tr>
           <tr><td style="color:#9C8F7E; padding:3px 0; vertical-align:top;">Remarks</td><td style="white-space:pre-line;">${p.notes||p.medical||'—'}</td></tr>
         </table>
