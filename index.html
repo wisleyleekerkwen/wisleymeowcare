@@ -252,7 +252,7 @@ const DEFAULT_HOLIDAYS = [
 ];
 function visitRemarksText(v, isEN){
   const lines=[];
-  if(v.tasks && v.tasks.length) v.tasks.forEach((t,i)=> lines.push((i+1)+'. '+(isEN? enOnly(t) : t)));
+  if(v.tasks && v.tasks.length) v.tasks.forEach((t,i)=> lines.push((i+1)+'. '+(isEN? enOnly(t) : zhOnly(t))));
   else if(v.remarks) lines.push(v.remarks);
   if(v.extraNotes) lines.push(v.extraNotes);
   return lines.join('\n');
@@ -403,6 +403,17 @@ function enOnly(s){
     .replace(/^\s*\+\s*/,'')
     .replace(/\s+/g,' ')
     .trim();
+}
+function zhOnly(s){
+  s = s||'';
+  const m = s.match(/^[\s\S]*[\u4e00-\u9fff、。，：！？；（）)]/);
+  return (m? m[0] : s).trim();
+}
+function enOnlyLines(text){
+  return (text||'').split('\n').map(l=>enOnly(l)).filter(l=>l).join('\n');
+}
+function zhOnlyLines(text){
+  return (text||'').split('\n').map(l=>zhOnly(l)).filter(l=>l).join('\n');
 }
 function todayStr(){ return new Date().toISOString().slice(0,10); }
 function val(id){ const e=document.getElementById(id); return e? e.value : ''; }
@@ -2236,7 +2247,7 @@ function renderDocDetail(type, id){
     <div class="muted">服务日期：${doc.startDate||'—'} ~ ${doc.endDate||'—'}（${(doc.visits||[]).length}天） · 时间段：${doc.timeSlot||'—'}</div>
     <div class="divider"></div>
     <table class="simple"><tr><th>日期</th><th>星期</th><th>时间段</th><th>价格</th></tr>
-    ${(doc.visits||[]).map(v=>`<tr><td>${v.date}<div class="muted" style="font-size:11px; white-space:pre-line;">${visitRemarksText(v)}</div></td><td>${dowLabel(v.date)}</td><td>${v.timeSlot||''}</td><td>${fmt(v.price)}</td></tr>`).join('')}
+    ${(doc.visits||[]).map(v=>`<tr><td>${v.date}<div class="muted" style="font-size:11px; white-space:pre-line;">${visitRemarksText(v, state.lang==='en')}</div></td><td>${dowLabel(v.date, state.lang==='en')}</td><td>${v.timeSlot||''}</td><td>${fmt(v.price)}</td></tr>`).join('')}
     ${doc.cctv&&doc.cctv.needed? `<tr><td colspan="3">CCTV 租用 (${doc.cctv.days}天 x ${fmt(doc.cctv.rate)})</td><td>${fmt(cctvTotal)}</td></tr>`:''}
     ${doc.holidayFee&&doc.holidayFee.needed? `<tr><td colspan="3">节日费 Holiday Fee</td><td>${fmt(holidayTotal)}</td></tr>`:''}
     </table>
@@ -2332,7 +2343,7 @@ function copyQuoteText(id){
   if(km) lines.push(`${isEN?'Distance':'距离 Distance'}: ${km}km`);
   lines.push('');
   lines.push(isEN? "What's Included:" : '服务包含 Included:');
-  included.forEach(t=> lines.push(`✓ ${isEN? enOnly(t) : t}`));
+  included.forEach(t=> lines.push(`✓ ${isEN? enOnly(t) : zhOnly(t)}`));
   lines.push(isEN? '(Customizable services available)' : '（可定制服务 Customizable services available）');
   lines.push('');
   lines.push(isEN? 'How pricing is calculated:' : '收费计算方式 How pricing is calculated:');
@@ -2825,8 +2836,8 @@ function genPDF(type, id, mode){
       <div style="flex:1;">
         <table style="width:100%; font-size:13px; border-collapse:collapse;">
           <tr><td style="color:#9C8F7E; padding:3px 0; width:40%;">Pet Name</td><td style="font-weight:700;">${p.name}</td></tr>
-          <tr><td style="color:#9C8F7E; padding:3px 0;">Gender</td><td>${p.gender==='公'?'Male 公':p.gender==='母'?'Female 母':'Unknown 未知'}</td></tr>
-          <tr><td style="color:#9C8F7E; padding:3px 0;">Sick/Pregnant?</td><td>${p.sickPregnant==='是'?'Yes 是':'No 否'}</td></tr>
+          <tr><td style="color:#9C8F7E; padding:3px 0;">Gender</td><td>${isEN? (p.gender==='公'?'Male':p.gender==='母'?'Female':'Unknown') : (p.gender||'未知')}</td></tr>
+          <tr><td style="color:#9C8F7E; padding:3px 0;">Sick/Pregnant?</td><td>${isEN? (p.sickPregnant==='是'?'Yes':'No') : (p.sickPregnant||'否')}</td></tr>
           <tr><td style="color:#9C8F7E; padding:3px 0; vertical-align:top;">Remarks</td><td style="white-space:pre-line;">${p.notes||p.medical||'—'}</td></tr>
         </table>
       </div>
@@ -2926,7 +2937,7 @@ function genPDF(type, id, mode){
         <div style="font-size:13px; color:#3E362C;">${(DB.settings.taskOptions||[]).filter(t=>{
           const low = t.toLowerCase();
           return !low.includes('medication') && !low.includes('喂药') && !low.includes('grooming') && !low.includes('梳毛');
-        }).map(t=>`✓ ${isEN? enOnly(t) : t}`).join('<br>')}</div>
+        }).map(t=>`✓ ${isEN? enOnly(t) : zhOnly(t)}`).join('<br>')}</div>
         <div style="font-size:12px; color:#8CA891; font-weight:700; margin-top:10px;">${isEN? '✨ Customizable services available' : '✨ 可定制服务 Customizable services available'}</div>
       </div>
       <div style="background:#fff; border:1px solid #EDE2D0; border-radius:14px; padding:14px 18px; margin-bottom:12px; font-size:13px;">
@@ -2939,7 +2950,7 @@ function genPDF(type, id, mode){
       </div>
       `}
 
-      ${type==='invoice'? `<div style="margin-top:14px; font-size:12px; color:#6b5f4f; white-space:pre-line;">${(DB.settings.serviceNotes||'').split('\n').map(l=>'** '+l).join('\n')}</div>` : ''}
+      ${type==='invoice'? `<div style="margin-top:14px; font-size:12px; color:#6b5f4f; white-space:pre-line;">${(isEN? enOnlyLines(DB.settings.serviceNotes) : zhOnlyLines(DB.settings.serviceNotes)).split('\n').map(l=>'** '+l).join('\n')}</div>` : ''}
 
       ${type==='invoice'? `
       <div style="margin-top:14px; background:#F4ECDF; border-radius:14px; padding:14px 18px; max-width:320px; margin-left:auto;">
@@ -2950,7 +2961,7 @@ function genPDF(type, id, mode){
         <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>定金 Deposit (${doc.depositPercent||50}%)</span><span>${fmt(dep)}</span></div>
         <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>尾款 Remaining</span><span>${fmt(total-dep)}</span></div>
       </div>
-      <div style="margin-top:16px; font-size:11.5px; color:#D97066; white-space:pre-line;">${DB.settings.terms||''}</div>
+      <div style="margin-top:16px; font-size:11.5px; color:#D97066; white-space:pre-line;">${isEN? enOnlyLines(DB.settings.terms) : zhOnlyLines(DB.settings.terms)}</div>
       ` : ''}
       ${doc.notes? `<div style="margin-top:10px; font-size:12px; color:#6b5f4f;">备注 Notes: ${doc.notes}</div>`:''}
     </div>
@@ -2959,7 +2970,7 @@ function genPDF(type, id, mode){
       ${qrBlocks}
     </div>
   </div>
-  ${type==='invoice'? `<div style="margin-top:18px; text-align:center; color:#c9bda3; font-size:12px;">🐾 感谢您的信任，我们会好好照顾您的猫咪 Thank you for trusting us with your cats 🐾</div>` : ''}
+  ${type==='invoice'? `<div style="margin-top:18px; text-align:center; color:#c9bda3; font-size:12px;">🐾 ${isEN? 'Thank you for trusting us with your cats' : '感谢您的信任，我们会好好照顾您的猫咪 Thank you for trusting us with your cats'} 🐾</div>` : ''}
   `;
   document.body.appendChild(wrap);
 
