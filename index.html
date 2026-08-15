@@ -397,12 +397,13 @@ function resizeImageFile(file, maxDim, cb){
 }
 function fmt(n){ return 'MYR ' + (Number(n)||0).toFixed(2); }
 function enOnly(s){
-  return (s||'')
-    .replace(/[\u4e00-\u9fff、。，：]/g,'')
-    .replace(/\(\s*\)/g,'')
-    .replace(/^\s*\+\s*/,'')
-    .replace(/\s+/g,' ')
-    .trim();
+  s = s||'';
+  let lastIdx = -1;
+  const re = /[\u4e00-\u9fff、。，：！？；（）]/g;
+  let match;
+  while((match = re.exec(s)) !== null){ lastIdx = match.index; }
+  if(lastIdx === -1) return s.trim();
+  return s.slice(lastIdx+1).replace(/^[\s\)\.\!\?；：，。、！]+/,'').trim();
 }
 function zhOnly(s){
   s = s||'';
