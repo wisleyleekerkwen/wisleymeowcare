@@ -880,7 +880,7 @@ function renderTerritoryBoard(){
     const isSel = selectedKey===area.key;
     if(!has) return '';
     const t = maxCount>minCount? (clients.length-minCount)/(maxCount-minCount) : 1;
-    const fontSize = (12 + t*15).toFixed(1);
+    const fontSize = (11 + t*9).toFixed(1);
     return `<div style="position:absolute; left:${area.x}%; top:${area.y}%; transform:translate(-50%,-50%); text-align:center; cursor:pointer; z-index:${isSel?6:5};" onclick="selectTerritoryArea('${area.key}')">
       ${isSel? `<div style="position:absolute; left:50%; top:50%; width:64px; height:64px; transform:translate(-50%,-50%); background:${area.color}; opacity:0.18; border-radius:50%;"></div>` : ''}
       <div style="font-family:'Fredoka',sans-serif; font-weight:700; font-size:${fontSize}px; line-height:1.05; color:${area.color}; text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff; white-space:nowrap; ${isSel?'text-decoration:underline; text-underline-offset:3px;':''}">${area.label}</div>
