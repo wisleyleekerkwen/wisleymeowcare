@@ -1595,7 +1595,7 @@ function invoiceRow(inv){
 function openDocForm(type, id){
   const list = type==='invoice'? DB.invoices : DB.quotes;
   const doc = id? list.find(x=>x.id===id) : null;
-  const clientOpts = DB.clients.map(c=>`<option value="${c.id}" ${doc&&doc.clientId===c.id?'selected':''}>${c.name}</option>`).join('');
+  const clientOpts = DB.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'zh')).map(c=>`<option value="${c.id}" ${doc&&doc.clientId===c.id?'selected':''}>${c.name}</option>`).join('');
   window.__visits = doc? JSON.parse(JSON.stringify(doc.visits||[])) : [];
   window.__docType = type; window.__docClientId = doc? doc.clientId : (type==='invoice'? (DB.clients[0]?DB.clients[0].id:'') : '');
   const firstVisitDate = window.__visits.length? window.__visits.slice().sort((a,b)=> a.date<b.date?-1:1)[0].date : null;
@@ -2390,7 +2390,7 @@ function duplicateDoc(type, id){
 function convertToInvoice(qid){
   const q = DB.quotes.find(x=>x.id===qid);
   if(q.clientId){ doConvertToInvoice(qid, q.clientId); return; }
-  const clientOpts = DB.clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  const clientOpts = DB.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'zh')).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
   openModal(`
   <div class="modalhead"><h2>登记客户</h2><button class="closex" onclick="closeModal()">✕</button></div>
   <div class="muted" style="margin-bottom:10px;">报价单上填的是「${q.leadName||'未命名'}」，选一位已有客户，或直接新增一位正式客户。</div>
@@ -2517,7 +2517,7 @@ function renderExpenses(){
   `;
 }
 function openExpenseForm(){
-  const clientOpts = DB.clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  const clientOpts = DB.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'zh')).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
   openModal(`
   <div class="modalhead"><h2>记录开销</h2><button class="closex" onclick="closeModal()">✕</button></div>
   <label class="flabel">类别</label><select id="f_exp_cat"><option>停车</option><option>过路费</option><option>平台费</option><option>里程费</option><option>其他</option></select>
