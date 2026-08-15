@@ -396,7 +396,14 @@ function resizeImageFile(file, maxDim, cb){
   reader.readAsDataURL(file);
 }
 function fmt(n){ return 'MYR ' + (Number(n)||0).toFixed(2); }
-function enOnly(s){ return (s||'').replace(/[\u4e00-\u9fff、。，：]/g,'').replace(/\s+/g,' ').trim(); }
+function enOnly(s){
+  return (s||'')
+    .replace(/[\u4e00-\u9fff、。，：]/g,'')
+    .replace(/\(\s*\)/g,'')
+    .replace(/^\s*\+\s*/,'')
+    .replace(/\s+/g,' ')
+    .trim();
+}
 function todayStr(){ return new Date().toISOString().slice(0,10); }
 function val(id){ const e=document.getElementById(id); return e? e.value : ''; }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 1900); }
@@ -2936,6 +2943,9 @@ function genPDF(type, id, mode){
 
       ${type==='invoice'? `
       <div style="margin-top:14px; background:#F4ECDF; border-radius:14px; padding:14px 18px; max-width:320px; margin-left:auto;">
+        ${discountOn? `<div style="display:flex; justify-content:space-between; padding:3px 0;"><span>小计 Subtotal</span><span>${fmt(subtotal)}</span></div>
+        <div style="display:flex; justify-content:space-between; padding:3px 0; color:#D97066;"><span>🏷️ 折扣 Discount ${doc.discount.type==='percent'?`(${doc.discount.amount}%)`:''}</span><span>-${fmt(discountTotal)}</span></div>` : ''}
+        ${(doc.creditApplied>0)? `<div style="display:flex; justify-content:space-between; padding:3px 0; color:#6C8B72;"><span>🎁 使用余额抵扣 Credit Applied</span><span>-${fmt(doc.creditApplied)}</span></div>` : ''}
         <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>总额 Total</span><span style="font-weight:800;">${fmt(total)}</span></div>
         <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>定金 Deposit (${doc.depositPercent||50}%)</span><span>${fmt(dep)}</span></div>
         <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>尾款 Remaining</span><span>${fmt(total-dep)}</span></div>
