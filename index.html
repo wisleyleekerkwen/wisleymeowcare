@@ -1144,6 +1144,7 @@ function renderClientList(){
     .slice().sort((a,b)=> a.name.localeCompare(b.name, undefined, {sensitivity:'base'}));
   return `
   <h1>${tr('clientsTitle')}</h1>
+  <button class="btn btn-soft btn-block" style="margin-bottom:10px;" onclick="openPasteClientModal()">📋 粘贴客户资料 Paste Client Info</button>
   <div class="searchbar ${window.__clientQuery?'has-value':''}" style="margin-bottom:14px;">
     <span class="sic">🔍</span>
     <input id="clientSearchInput" placeholder="${tr('searchClient')}" value="${window.__clientQuery||''}" oninput="window.__clientQuery=this.value; render();">
@@ -1333,15 +1334,15 @@ function petCard(clientId,p){
     </div>
   </div>`;
 }
-function openClientForm(id){
+function openClientForm(id, prefill){
   const c = id? DB.clients.find(x=>x.id===id) : null;
   const care = (c&&c.careInfo) || {};
-  window.__cpets = c? JSON.parse(JSON.stringify(c.pets||[])) : [];
+  window.__cpets = c? JSON.parse(JSON.stringify(c.pets||[])) : (prefill&&prefill.pets? prefill.pets : []);
   openModal(`
   <div class="modalhead"><h2>${c?'编辑客户':'新增客户'}</h2><button class="closex" onclick="closeModal()">✕</button></div>
-  <label class="flabel">姓名</label><input id="f_name" value="${c?c.name:''}" placeholder="客户姓名">
-  <label class="flabel">手机号码</label><input id="f_phone" value="${c?c.phone||'':''}" placeholder="012-3456789">
-  <label class="flabel">地址</label><textarea id="f_addr" placeholder="上门服务地址">${c?c.address||'':''}</textarea>
+  <label class="flabel">姓名</label><input id="f_name" value="${c?c.name:(prefill&&prefill.name||'')}" placeholder="客户姓名">
+  <label class="flabel">手机号码</label><input id="f_phone" value="${c?c.phone||'':(prefill&&prefill.phone||'')}" placeholder="012-3456789">
+  <label class="flabel">地址</label><textarea id="f_addr" placeholder="上门服务地址">${c?c.address||'':(prefill&&prefill.address||'')}</textarea>
   <label class="flabel">钥匙 / 门禁信息</label><textarea id="f_key" placeholder="密码、取钥匙方式等">${c?c.keyInfo||'':''}</textarea>
   <label class="flabel">停车位</label><textarea id="f_park" placeholder="停车说明">${c?c.parking||'':''}</textarea>
   <label class="flabel">往返里程 (km) · 用于自动计价</label><input type="number" id="f_km" value="${c&&c.km?c.km:''}" placeholder="例如 19">
@@ -1398,6 +1399,62 @@ function renderPetRows(){
   `).join('');
 }
 function addPetRow(){ window.__cpets.push({id:uid(), name:'', gender:'未知', sickPregnant:'否', birthday:'', medical:'', notes:'', photo:''}); renderPetRows(); }
+function splitList(s){
+  return (s||'').split(/[&＆、,，\/]+|(?:\s+和\s+)|(?:\s+and\s+)/i).map(x=>x.trim()).filter(x=>x);
+}
+function extractField(text, labels){
+  const lines = (text||'').split('\n');
+  for(const line of lines){
+    for(const label of labels){
+      const idx = line.indexOf(label);
+      if(idx>=0){
+        const rest = line.slice(idx+label.length);
+        const cIdx = Math.max(rest.indexOf('：'), rest.indexOf(':'));
+        if(cIdx>=0) return rest.slice(cIdx+1).trim();
+      }
+    }
+  }
+  return '';
+}
+function openPasteClientModal(){
+  openModal(`
+  <div class="modalhead"><h2>📋 粘贴客户资料 Paste Client Info</h2><button class="closex" onclick="closeModal()">✕</button></div>
+  <div class="muted" style="margin-bottom:10px; font-size:12.5px;">把客户填的表格内容整段粘贴到下面，点"解析"会自动生成客户和猫咪资料，保存前还能再检查修改。</div>
+  <textarea id="f_paste_text" style="min-height:220px; font-size:13px;" placeholder="Owner Name 姓名：...&#10;Contact Number 联系号码：...&#10;Address 地址：...&#10;Pet Name 猫咪名字：...&#10;Gender 性别：...&#10;..."></textarea>
+  <button class="btn btn-primary btn-block" onclick="parseClientInfoText()">🔍 解析 Parse</button>
+  `);
+}
+function parseClientInfoText(){
+  const text = val('f_paste_text');
+  if(!text.trim()){ toast('请先粘贴内容'); return; }
+  const name = extractField(text, ['Owner Name','姓名']);
+  const phone = extractField(text, ['Contact Number','联系号码','电话']);
+  const address = extractField(text, ['Address','地址']);
+  const petNamesRaw = extractField(text, ['Pet Name','猫咪名字']);
+  const genderRaw = extractField(text, ['Gender','性别']);
+  const sickRaw = extractField(text, ['Sick/Pregnant','是否生病']);
+  const cctvRaw = extractField(text, ['CCTV','监视器']);
+  const remarksRaw = extractField(text, ['Remarks','备注']);
+
+  const petNames = splitList(petNamesRaw);
+  const genders = splitList(genderRaw);
+  const sickVals = splitList(sickRaw);
+  const isSick = (v)=>{ if(!v) return '否'; return (/是|yes|pregnant|sick/i.test(v)) ? '是' : '否'; };
+  const notesParts = [];
+  if(cctvRaw) notesParts.push('CCTV: '+cctvRaw);
+  if(remarksRaw) notesParts.push(remarksRaw);
+  const combinedNotes = notesParts.join(' · ');
+
+  const pets = petNames.length? petNames.map((n,i)=>({
+    id: uid(), name: n,
+    gender: genders[i]==='公'||/^m(ale)?$/i.test(genders[i]||'')?'公' : (genders[i]==='母'||/^f(emale)?$/i.test(genders[i]||'')?'母':'未知'),
+    sickPregnant: isSick(sickVals[i]||sickVals[0]||sickRaw),
+    birthday:'', medical:'', notes: combinedNotes, photo:''
+  })) : [];
+
+  if(!name){ toast('没找到姓名，麻烦确认粘贴的内容格式 Could not find a name, check the pasted text'); }
+  openClientForm(null, { name, phone, address, pets });
+}
 function onCPetPhoto(ev, idx){
   const file = ev.target.files[0]; if(!file) return;
   resizeImageFile(file, 900, (dataUrl)=>{ window.__cpets[idx].photo = dataUrl; renderPetRows(); });
@@ -1618,7 +1675,7 @@ function openDocForm(type, id){
   openModal(`
   <div class="modalhead"><h2>${doc? (type==='invoice'?'编辑账单':'编辑报价') : (type==='invoice'?'新建账单':'新建报价')}</h2><button class="closex" onclick="closeModal()">✕</button></div>
   ${type==='invoice'? `
-  <label class="flabel">客户</label><select id="f_doc_client" onchange="window.__docClientId=this.value; document.getElementById('docCreditWrap').innerHTML=docCreditHTML(null);">${clientOpts||'<option value="">请先添加客户</option>'}</select>
+  <label class="flabel">客户</label><select id="f_doc_client" onchange="window.__docClientId=this.value; document.getElementById('docCreditWrap').innerHTML=docCreditHTML(null); onDocClientChange();">${clientOpts||'<option value="">请先添加客户</option>'}</select>
   ` : `
   <div class="muted" style="margin-bottom:10px;">报价阶段还不需要选客户 — 等对方确认接受后，再在「转为账单」时登记成正式客户。</div>
   <label class="flabel">客户姓名 / 称呼</label><input id="f_doc_leadname" value="${doc?doc.leadName||'':''}" placeholder="例如：Lacey">
@@ -1966,6 +2023,12 @@ function onOriginSelectChange(){
   const inp = document.getElementById('f_doc_origin');
   if(sel==='custom'){ inp.style.display='block'; inp.value=''; inp.focus(); }
   else { inp.style.display='none'; inp.value=sel; }
+}
+function onDocClientChange(){
+  const c = getClientById(window.__docClientId);
+  const catInput = document.getElementById('f_doc_catcount');
+  if(c && catInput){ catInput.value = (c.pets||[]).length || 1; }
+  applySuggestedPriceToAll();
 }
 function applySuggestedPriceToAll(){
   const type = window.__docType;
