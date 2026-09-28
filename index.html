@@ -2870,6 +2870,8 @@ function genPDF(type, id, mode){
   const discountTotal = discountAmt(doc);
   const total = docTotal(doc);
   const dep = depositAmt(doc);
+  const paidToDate = (doc.payments||[]).reduce((s,p)=>s+Number(p.amount),0);
+  const balanceDue = Math.max(total - paidToDate, 0);
   const totalDays = (doc.visits||[]).length;
   const catCount = doc.catCount || pets.length || 1;
   const km = c.km || (doc.route && doc.route.distanceKm) || 0;
@@ -3023,7 +3025,9 @@ function genPDF(type, id, mode){
         ${(doc.creditApplied>0)? `<div style="display:flex; justify-content:space-between; padding:3px 0; color:#6C8B72;"><span>🎁 使用余额抵扣 Credit Applied</span><span>-${fmt(doc.creditApplied)}</span></div>` : ''}
         <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>总额 Total</span><span style="font-weight:800;">${fmt(total)}</span></div>
         <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>定金 Deposit (${doc.depositPercent||50}%)</span><span>${fmt(dep)}</span></div>
-        <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>尾款 Remaining</span><span>${fmt(total-dep)}</span></div>
+        <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>${isEN?'Balance after deposit':'尾款 Balance after deposit'}</span><span>${fmt(total-dep)}</span></div>
+        ${paidToDate>0? `<div style="display:flex; justify-content:space-between; padding:3px 0; color:#6C8B72;"><span>${isEN?'Paid to date':'已付 Paid'}</span><span>${fmt(paidToDate)}</span></div>
+        <div style="display:flex; justify-content:space-between; padding:6px 0 3px; margin-top:4px; border-top:1px dashed #D9CDB8; font-weight:800;"><span>${isEN?'Balance Due':'应付余额 Balance Due'}</span><span>${fmt(balanceDue)}</span></div>` : ''}
       </div>
       <div style="margin-top:16px; font-size:11.5px; color:#D97066; white-space:pre-line;">${isEN? enOnlyLines(DB.settings.terms) : zhOnlyLines(DB.settings.terms)}</div>
       ` : ''}
