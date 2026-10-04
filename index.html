@@ -1708,14 +1708,10 @@ function openDocForm(type, id){
   <label class="flabel">服务日期 Service Dates（点击日历上的日期即可选择，可多选、不需要连续 tap any dates, no need to be consecutive）</label>
   <div class="card" style="background:var(--card-alt); padding:14px; margin-bottom:10px;">
     <div class="checkline" style="margin-bottom:10px;"><input type="checkbox" id="f_doc_twice"> 🔁 每天两次 Twice a day（新选的日期都会算 2 次上门）</div>
-    <div class="muted" style="font-size:12px; margin-bottom:8px;">🗓️ 连续多天？直接填区间 Long consecutive job? Fill a date range instead of tapping each day</div>
-    <div class="row" style="gap:8px; margin-bottom:8px;">
-      <input type="date" id="f_doc_rangestart" style="flex:1;">
-      <span class="muted">～</span>
-      <input type="date" id="f_doc_rangeend" style="flex:1;">
-    </div>
-    <button class="btn btn-outline btn-block" onclick="fillDocDateRange()">✓ 全选区间内每一天 Fill Every Day in Range</button>
-    <button class="btn btn-soft btn-block" style="margin-top:8px;" id="f_doc_rangepick_btn" onclick="toggleRangePickMode()">📍 改用日历点选起止日 Tap calendar for start/end instead</button>
+    <input type="hidden" id="f_doc_rangestart">
+    <input type="hidden" id="f_doc_rangeend">
+    <div class="muted" style="font-size:12px; margin-bottom:8px;">🗓️ 连续多天？Long consecutive job?</div>
+    <button class="btn btn-outline btn-block" id="f_doc_rangepick_btn" onclick="toggleRangePickMode()">📍 点选起止日，自动填满区间 Tap start/end dates to fill the range</button>
     <div class="divider"></div>
     <div id="docCalWrap">${docCalendarHTML()}</div>
   </div>
@@ -1898,7 +1894,7 @@ function toggleRangePickMode(){
   window.__rangePicking = !window.__rangePicking;
   window.__rangePickStart = null;
   const btn = document.getElementById('f_doc_rangepick_btn');
-  if(btn) btn.textContent = window.__rangePicking? '✕ 取消点选 Cancel' : '📍 改用日历点选起止日 Tap calendar for start/end instead';
+  if(btn) btn.textContent = window.__rangePicking? '✕ 取消点选 Cancel' : '📍 点选起止日，自动填满区间 Tap start/end dates to fill the range';
   document.getElementById('docCalWrap').innerHTML = docCalendarHTML();
 }
 function handleDocCalDayTap(ds){
@@ -1916,7 +1912,7 @@ function handleDocCalDayTap(ds){
     window.__rangePicking = false;
     window.__rangePickStart = null;
     const btn = document.getElementById('f_doc_rangepick_btn');
-    if(btn) btn.textContent = '📍 改用日历点选起止日 Tap calendar for start/end instead';
+    if(btn) btn.textContent = '📍 点选起止日，自动填满区间 Tap start/end dates to fill the range';
     fillDocDateRange();
     return;
   }
