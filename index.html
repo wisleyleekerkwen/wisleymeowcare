@@ -416,7 +416,8 @@ function enOnlyLines(text){
 function zhOnlyLines(text){
   return (text||'').split('\n').map(l=>zhOnly(l)).filter(l=>l).join('\n');
 }
-function todayStr(){ return new Date().toISOString().slice(0,10); }
+function dateStr(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function todayStr(){ return dateStr(new Date()); }
 function val(id){ const e=document.getElementById(id); return e? e.value : ''; }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 1900); }
 const AVA_COLORS=['#8CA891','#F3A57E','#E7B04E','#E6A0A6','#7FA7C4','#B79AD1'];
@@ -578,7 +579,7 @@ function monthlyFinancials(basis){
         if(numDays>0 && inv.startDate){
           let d = new Date(inv.startDate+'T00:00:00');
           for(let i=0;i<numDays;i++){
-            const m = d.toISOString().slice(0,7);
+            const m = dateStr(d).slice(0,7);
             ensure(m).income += dayRate;
             d.setDate(d.getDate()+1);
           }
@@ -1874,7 +1875,7 @@ function fillDocDateRange(start, end){
   let added = 0;
   let d = new Date(start+'T00:00:00'); const endD = new Date(end+'T00:00:00');
   while(d <= endD){
-    const ds = d.toISOString().slice(0,10);
+    const ds = dateStr(d);
     if(!existing.has(ds)){
       addVisitsForDate(ds);
       existing.add(ds); added++;
@@ -1927,7 +1928,7 @@ function regenerateVisits(){
   const perDay = freqVal==='twice' ? 2 : 1;
   const timeSlot = val('f_doc_timeslot');
   const dates=[]; let d=new Date(start+'T00:00:00'); const endD=new Date(end+'T00:00:00');
-  while(d<=endD){ dates.push(d.toISOString().slice(0,10)); d.setDate(d.getDate()+interval); }
+  while(d<=endD){ dates.push(dateStr(d)); d.setDate(d.getDate()+interval); }
   window.__visits = [];
   dates.forEach(ds=>{
     for(let n=0; n<perDay; n++){
