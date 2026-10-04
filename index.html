@@ -1572,6 +1572,26 @@ function renderMoney(){
 
 /* ---- shared invoice/quote model ---- */
 function totalServiceCount_(){ const t=todayStr(); return DB.invoices.filter(inv=>!inv.cancelled).reduce((s,inv)=> s+(inv.visits||[]).filter(v=>v.date && v.date<=t).length, 0); }
+function holidayPriceExtra(doc){
+  const map = {};
+  if(!doc.holidayFee || !doc.holidayFee.needed) return map;
+  const amount = Number(doc.holidayFee.amount)||0;
+  if(!amount) return map;
+  const visits = doc.visits||[];
+  let targets;
+  if(doc.holidayFee.dates && doc.holidayFee.dates.length){
+    const pickedSet = new Set(doc.holidayFee.dates);
+    targets = visits.filter(v=>pickedSet.has(v.date));
+  } else {
+    const holidaySet = new Set((DB.settings.holidays||[]).map(h=>h.date));
+    const matched = visits.filter(v=>holidaySet.has(v.date));
+    targets = matched.length? matched : (visits.length? [visits[visits.length-1]] : []);
+  }
+  if(!targets.length) return map;
+  const share = amount/targets.length;
+  targets.forEach(v=>{ map[v.id||v.date] = (map[v.id||v.date]||0) + share; });
+  return map;
+}
 function docSubtotal(doc){
   const visitsTotal = (doc.visits||[]).reduce((s,v)=>s+(Number(v.price)||0),0);
   const cctvTotal = (doc.cctv && doc.cctv.needed) ? (Number(doc.cctv.days)||0)*(Number(doc.cctv.rate)||0) : 0;
@@ -1667,6 +1687,7 @@ function openDocForm(type, id){
   const clientOpts = DB.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'zh')).map(c=>`<option value="${c.id}" ${doc&&doc.clientId===c.id?'selected':''}>${c.name}</option>`).join('');
   window.__visits = doc? JSON.parse(JSON.stringify(doc.visits||[])) : [];
   window.__docType = type; window.__docClientId = doc? doc.clientId : (type==='invoice'? (DB.clients[0]?DB.clients[0].id:'') : '');
+  window.__editingDoc = doc;
   const firstVisitDate = window.__visits.length? window.__visits.slice().sort((a,b)=> a.date<b.date?-1:1)[0].date : null;
   const calBase = firstVisitDate? new Date(firstVisitDate+'T00:00:00') : new Date();
   window.__docCalMonth = new Date(calBase.getFullYear(), calBase.getMonth(), 1);
@@ -1694,6 +1715,7 @@ function openDocForm(type, id){
       <input type="date" id="f_doc_rangeend" style="flex:1;">
     </div>
     <button class="btn btn-outline btn-block" onclick="fillDocDateRange()">✓ 全选区间内每一天 Fill Every Day in Range</button>
+    <button class="btn btn-soft btn-block" style="margin-top:8px;" id="f_doc_rangepick_btn" onclick="toggleRangePickMode()">📍 改用日历点选起止日 Tap calendar for start/end instead</button>
     <div class="divider"></div>
     <div id="docCalWrap">${docCalendarHTML()}</div>
   </div>
@@ -1737,6 +1759,8 @@ function openDocForm(type, id){
   <div class="checkline"><input type="checkbox" id="f_doc_holiday_needed" ${doc&&doc.holidayFee&&doc.holidayFee.needed?'checked':''} onchange="toggleHolidayFeeFields()"> 收节日费 Holiday Fee</div>
   <div id="holidayFeeFields" style="display:${doc&&doc.holidayFee&&doc.holidayFee.needed?'block':'none'}; margin-bottom:14px;">
     <label class="flabel">节日费金额 Amount</label><input type="number" id="f_doc_holiday_amt" value="${doc&&doc.holidayFee?doc.holidayFee.amount||'':''}" placeholder="例如 20">
+    <label class="flabel">在哪一天收 Which day(s)</label>
+    <div id="holidayDatesWrap">${holidayDateCheckboxesHTML(doc)}</div>
   </div>
 
   <div class="checkline"><input type="checkbox" id="f_doc_discount_needed" ${doc&&doc.discount&&doc.discount.needed?'checked':''} onchange="toggleDiscountFields()"> 🏷️ 给优惠 Apply Discount</div>
@@ -1769,7 +1793,17 @@ function openRouteInMaps(){
 }
 function getClientById(id){ return DB.clients.find(x=>x.id===id); }
 function toggleCctvFields(){ document.getElementById('cctvFields').style.display = document.getElementById('f_doc_cctv_needed').checked? 'block':'none'; }
-function toggleHolidayFeeFields(){ document.getElementById('holidayFeeFields').style.display = document.getElementById('f_doc_holiday_needed').checked? 'block':'none'; }
+function toggleHolidayFeeFields(){
+  const show = document.getElementById('f_doc_holiday_needed').checked;
+  document.getElementById('holidayFeeFields').style.display = show? 'block':'none';
+  if(show){ const wrap = document.getElementById('holidayDatesWrap'); if(wrap) wrap.innerHTML = holidayDateCheckboxesHTML(window.__editingDoc); }
+}
+function holidayDateCheckboxesHTML(doc){
+  const prevDates = new Set((doc&&doc.holidayFee&&doc.holidayFee.dates)||[]);
+  const visits = (window.__visits||[]).slice().sort((a,b)=> a.date<b.date?-1:1);
+  if(!visits.length) return '<div class="muted" style="font-size:12px;">请先在上面选好服务日期</div>';
+  return visits.map(v=>`<div class="checkline"><input type="checkbox" class="f_holiday_date" value="${v.date}" ${prevDates.has(v.date)?'checked':''}> ${v.date}（${dowLabel(v.date)}）</div>`).join('');
+}
 function toggleDiscountFields(){ document.getElementById('discountFields').style.display = document.getElementById('f_doc_discount_needed').checked? 'block':'none'; }
 function docCreditHTML(doc){
   if(window.__docType!=='invoice') return '';
@@ -1793,11 +1827,14 @@ function docCalendarHTML(){
   const cells = []; for(let i=0;i<startDow;i++) cells.push(null); for(let d=1; d<=daysInMonth; d++) cells.push(d);
   const dowLabels = ['日','一','二','三','四','五','六'];
   const todayS = todayStr();
+  const rangePicking = !!window.__rangePicking;
+  const rangeStart = window.__rangePickStart;
   const grid = cells.map(d=>{
     if(!d) return `<div class="cal-cell empty"></div>`;
     const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const cls = ['cal-cell']; if(selectedDates.has(ds)) cls.push('selected'); if(ds===todayS) cls.push('today');
-    return `<div class="${cls.join(' ')}" onclick="toggleDocCalDate('${ds}')">${d}</div>`;
+    const style = (rangePicking && ds===rangeStart) ? 'style="box-shadow:0 0 0 2.5px var(--peach-dark); border-radius:10px;"' : '';
+    return `<div class="${cls.join(' ')}" ${style} onclick="handleDocCalDayTap('${ds}')">${d}</div>`;
   }).join('');
   const count = new Set((window.__visits||[]).map(v=>v.date)).size;
   return `
@@ -1806,6 +1843,7 @@ function docCalendarHTML(){
     <div style="font-weight:800;">${year}年${month+1}月</div>
     <button class="btn btn-soft btn-sm" onclick="shiftDocCalMonth(1)">›</button>
   </div>
+  ${rangePicking? `<div class="muted" style="text-align:center; margin-bottom:8px; font-weight:700; color:var(--peach-dark);">📍 ${rangeStart? '再点结束日期 Now tap the end date' : '请点起始日期 Tap the start date'}</div>` : ''}
   <div class="cal-grid">
     ${dowLabels.map(l=>`<div class="cal-dow">${l}</div>`).join('')}
     ${grid}
@@ -1856,6 +1894,34 @@ function fillDocDateRange(){
   renderVisitRows();
   toast(`已添加 ${added} 天 Added ${added} days`);
 }
+function toggleRangePickMode(){
+  window.__rangePicking = !window.__rangePicking;
+  window.__rangePickStart = null;
+  const btn = document.getElementById('f_doc_rangepick_btn');
+  if(btn) btn.textContent = window.__rangePicking? '✕ 取消点选 Cancel' : '📍 改用日历点选起止日 Tap calendar for start/end instead';
+  document.getElementById('docCalWrap').innerHTML = docCalendarHTML();
+}
+function handleDocCalDayTap(ds){
+  if(window.__rangePicking){
+    if(!window.__rangePickStart){
+      window.__rangePickStart = ds;
+      document.getElementById('docCalWrap').innerHTML = docCalendarHTML();
+      return;
+    }
+    let start = window.__rangePickStart, end = ds;
+    if(end < start){ const t=start; start=end; end=t; }
+    const startEl = document.getElementById('f_doc_rangestart'), endEl = document.getElementById('f_doc_rangeend');
+    if(startEl) startEl.value = start;
+    if(endEl) endEl.value = end;
+    window.__rangePicking = false;
+    window.__rangePickStart = null;
+    const btn = document.getElementById('f_doc_rangepick_btn');
+    if(btn) btn.textContent = '📍 改用日历点选起止日 Tap calendar for start/end instead';
+    fillDocDateRange();
+    return;
+  }
+  toggleDocCalDate(ds);
+}
 function toggleDocCalDate(ds){
   if(!window.__visits) window.__visits=[];
   const hasDate = window.__visits.some(v=>v.date===ds);
@@ -1874,6 +1940,8 @@ function updateDocDateRangeFromVisits(){
   if(dates.length){ if(startEl) startEl.value = dates[0]; if(endEl) endEl.value = dates[dates.length-1]; }
   const cctvDaysInput = document.getElementById('f_doc_cctv_days');
   if(cctvDaysInput) cctvDaysInput.value = dates.length? daysBetweenInclusive(dates[0], dates[dates.length-1]) : 0;
+  const holidayWrap = document.getElementById('holidayDatesWrap');
+  if(holidayWrap) holidayWrap.innerHTML = holidayDateCheckboxesHTML(window.__editingDoc);
 }
 function regenerateVisits(){
   const start = val('f_doc_start'), end = val('f_doc_end');
@@ -2066,7 +2134,7 @@ function saveDoc(type, id){
   }
   Object.assign(data, {
     cctv: { needed: document.getElementById('f_doc_cctv_needed').checked, days: Number(val('f_doc_cctv_days'))||0, rate: Number(val('f_doc_cctv_rate'))||DB.settings.cctvDailyRate },
-    holidayFee: { needed: document.getElementById('f_doc_holiday_needed').checked, amount: Number(val('f_doc_holiday_amt'))||0 },
+    holidayFee: { needed: document.getElementById('f_doc_holiday_needed').checked, amount: Number(val('f_doc_holiday_amt'))||0, dates: Array.from(document.querySelectorAll('.f_holiday_date:checked')).map(el=>el.value) },
     discount: { needed: document.getElementById('f_doc_discount_needed').checked, type: val('f_doc_discount_type')||'fixed', amount: Number(val('f_doc_discount_amt'))||0 },
     depositPercent: Number(val('f_doc_deposit'))||50,
     notes: val('f_doc_notes').trim(),
@@ -2311,9 +2379,8 @@ function renderDocDetail(type, id){
     <div class="muted">服务日期：${doc.startDate||'—'} ~ ${doc.endDate||'—'}（${(doc.visits||[]).length}天） · 时间段：${doc.timeSlot||'—'}</div>
     <div class="divider"></div>
     <table class="simple"><tr><th>日期</th><th>星期</th><th>时间段</th><th>价格</th></tr>
-    ${(doc.visits||[]).map(v=>`<tr><td>${v.date}<div class="muted" style="font-size:11px; white-space:pre-line;">${visitRemarksText(v, state.lang==='en')}</div></td><td>${dowLabel(v.date, state.lang==='en')}</td><td>${v.timeSlot||''}</td><td>${fmt(v.price)}</td></tr>`).join('')}
+    ${(()=>{ const hExtra = holidayPriceExtra(doc); return (doc.visits||[]).map(v=>{ const extra = hExtra[v.id||v.date]||0; return `<tr><td>${v.date}<div class="muted" style="font-size:11px; white-space:pre-line;">${visitRemarksText(v, state.lang==='en')}${extra? `<br>🎉 含节日费 +${fmt(extra)}`:''}</div></td><td>${dowLabel(v.date, state.lang==='en')}</td><td>${v.timeSlot||''}</td><td>${fmt((Number(v.price)||0)+extra)}</td></tr>`; }).join(''); })()}
     ${doc.cctv&&doc.cctv.needed? `<tr><td colspan="3">CCTV 租用 (${doc.cctv.days}天 x ${fmt(doc.cctv.rate)})</td><td>${fmt(cctvTotal)}</td></tr>`:''}
-    ${doc.holidayFee&&doc.holidayFee.needed? `<tr><td colspan="3">节日费 Holiday Fee</td><td>${fmt(holidayTotal)}</td></tr>`:''}
     </table>
     <div class="divider"></div>
     ${discountOn? `<div class="totalline"><span>小计</span><span>${fmt(subtotal)}</span></div>
@@ -2877,25 +2944,22 @@ function genPDF(type, id, mode){
   const km = c.km || (doc.route && doc.route.distanceKm) || 0;
   const est = km? suggestedPrice(km, catCount) : null;
   const unitPrice = (doc.visits&&doc.visits[0])? (Number(doc.visits[0].price)||0) : 0;
+  const hExtra = holidayPriceExtra(doc);
 
-  const visitRows = (doc.visits||[]).map(v=>`
+  const visitRows = (doc.visits||[]).map(v=>{ const extra = hExtra[v.id||v.date]||0; return `
     <tr>
       <td style="padding:8px 6px; border-top:1px solid #EDE2D0;">${v.date}</td>
       <td style="padding:8px 6px; border-top:1px solid #EDE2D0;">${dowLabel(v.date, isEN)}</td>
       <td style="padding:8px 6px; border-top:1px solid #EDE2D0; background:#F4ECDF;">${v.timeSlot||''}</td>
-      <td style="padding:8px 6px; border-top:1px solid #EDE2D0; background:#F4ECDF; white-space:pre-line; font-size:12px;">${visitRemarksText(v, isEN).replace(/</g,'&lt;')}</td>
-      <td style="padding:8px 6px; border-top:1px solid #EDE2D0; text-align:right; font-weight:700;">${fmt(v.price)}</td>
-    </tr>`).join('');
+      <td style="padding:8px 6px; border-top:1px solid #EDE2D0; background:#F4ECDF; white-space:pre-line; font-size:12px;">${visitRemarksText(v, isEN).replace(/</g,'&lt;')}${extra? `<br>🎉 ${isEN?'Incl. holiday fee':'含节日费'} +${fmt(extra)}`:''}</td>
+      <td style="padding:8px 6px; border-top:1px solid #EDE2D0; text-align:right; font-weight:700;">${fmt((Number(v.price)||0)+extra)}</td>
+    </tr>`;}).join('');
   const cctvRow = cctvOn? `
     <tr>
       <td colspan="4" style="padding:8px 6px; border-top:2px solid #EDE2D0; font-weight:700;">${doc.startDate||''} ~ ${doc.endDate||''}（${doc.cctv.days} days） · CCTV 租用 CCTV Rental</td>
       <td style="padding:8px 6px; border-top:2px solid #EDE2D0; text-align:right; font-weight:700;">${fmt(cctvTotal)}</td>
     </tr>` : '';
-  const holidayRow = holidayOn? `
-    <tr>
-      <td colspan="4" style="padding:8px 6px; border-top:2px solid #EDE2D0; font-weight:700;">节日费 Holiday Fee</td>
-      <td style="padding:8px 6px; border-top:2px solid #EDE2D0; text-align:right; font-weight:700;">${fmt(holidayTotal)}</td>
-    </tr>` : '';
+  const holidayRow = '';
 
   const petBlocks = pets.length? pets.map(p=>`
     <div style="display:flex; gap:16px; margin-bottom:14px;">
