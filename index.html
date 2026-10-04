@@ -1711,7 +1711,7 @@ function openDocForm(type, id){
     <input type="hidden" id="f_doc_rangestart">
     <input type="hidden" id="f_doc_rangeend">
     <div class="muted" style="font-size:12px; margin-bottom:8px;">🗓️ 连续多天？Long consecutive job?</div>
-    <button class="btn btn-outline btn-block" id="f_doc_rangepick_btn" onclick="toggleRangePickMode()">📍 点选起止日，自动填满区间 Tap start/end dates to fill the range</button>
+    <button class="btn btn-outline btn-block" id="f_doc_rangepick_btn" onclick="fillRangeFromLastTaps()">📍 用刚点的两天填满区间 Fill range using the last 2 days tapped</button>
     <div class="divider"></div>
     <div id="docCalWrap">${docCalendarHTML()}</div>
   </div>
@@ -1823,14 +1823,13 @@ function docCalendarHTML(){
   const cells = []; for(let i=0;i<startDow;i++) cells.push(null); for(let d=1; d<=daysInMonth; d++) cells.push(d);
   const dowLabels = ['日','一','二','三','四','五','六'];
   const todayS = todayStr();
-  const rangePicking = !!window.__rangePicking;
-  const rangeStart = window.__rangePickStart;
+  const lastTaps = window.__lastTwoTapped || [];
   const grid = cells.map(d=>{
     if(!d) return `<div class="cal-cell empty"></div>`;
     const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const cls = ['cal-cell']; if(selectedDates.has(ds)) cls.push('selected'); if(ds===todayS) cls.push('today');
-    const style = (rangePicking && ds===rangeStart) ? 'style="box-shadow:0 0 0 2.5px var(--peach-dark); border-radius:10px;"' : '';
-    return `<div class="${cls.join(' ')}" ${style} onclick="handleDocCalDayTap('${ds}')">${d}</div>`;
+    const style = lastTaps.includes(ds) ? 'style="box-shadow:0 0 0 2.5px var(--peach-dark); border-radius:10px;"' : '';
+    return `<div class="${cls.join(' ')}" ${style} onclick="toggleDocCalDate('${ds}')">${d}</div>`;
   }).join('');
   const count = new Set((window.__visits||[]).map(v=>v.date)).size;
   return `
@@ -1839,7 +1838,6 @@ function docCalendarHTML(){
     <div style="font-weight:800;">${year}年${month+1}月</div>
     <button class="btn btn-soft btn-sm" onclick="shiftDocCalMonth(1)">›</button>
   </div>
-  ${rangePicking? `<div class="muted" style="text-align:center; margin-bottom:8px; font-weight:700; color:var(--peach-dark);">📍 ${rangeStart? '再点结束日期 Now tap the end date' : '请点起始日期 Tap the start date'}</div>` : ''}
   <div class="cal-grid">
     ${dowLabels.map(l=>`<div class="cal-dow">${l}</div>`).join('')}
     ${grid}
@@ -1867,8 +1865,8 @@ function addVisitsForDate(ds){
     window.__visits.push({id:uid(), date:ds, timeSlot:'', tasks: defaultTaskSelection(), extraNotes:'', price:0});
   }
 }
-function fillDocDateRange(){
-  const start = val('f_doc_rangestart'), end = val('f_doc_rangeend');
+function fillDocDateRange(start, end){
+  if(start===undefined){ start = val('f_doc_rangestart'); end = val('f_doc_rangeend'); }
   if(!start || !end){ toast('请先选择区间的起止日期'); return; }
   if(end < start){ toast('结束日期不能早于起始日期'); return; }
   if(!window.__visits) window.__visits = [];
@@ -1890,36 +1888,18 @@ function fillDocDateRange(){
   renderVisitRows();
   toast(`已添加 ${added} 天 Added ${added} days`);
 }
-function toggleRangePickMode(){
-  window.__rangePicking = !window.__rangePicking;
-  window.__rangePickStart = null;
-  const btn = document.getElementById('f_doc_rangepick_btn');
-  if(btn) btn.textContent = window.__rangePicking? '✕ 取消点选 Cancel' : '📍 点选起止日，自动填满区间 Tap start/end dates to fill the range';
-  document.getElementById('docCalWrap').innerHTML = docCalendarHTML();
-}
-function handleDocCalDayTap(ds){
-  if(window.__rangePicking){
-    if(!window.__rangePickStart){
-      window.__rangePickStart = ds;
-      document.getElementById('docCalWrap').innerHTML = docCalendarHTML();
-      return;
-    }
-    let start = window.__rangePickStart, end = ds;
-    if(end < start){ const t=start; start=end; end=t; }
-    const startEl = document.getElementById('f_doc_rangestart'), endEl = document.getElementById('f_doc_rangeend');
-    if(startEl) startEl.value = start;
-    if(endEl) endEl.value = end;
-    window.__rangePicking = false;
-    window.__rangePickStart = null;
-    const btn = document.getElementById('f_doc_rangepick_btn');
-    if(btn) btn.textContent = '📍 点选起止日，自动填满区间 Tap start/end dates to fill the range';
-    fillDocDateRange();
-    return;
-  }
-  toggleDocCalDate(ds);
+function fillRangeFromLastTaps(){
+  const taps = window.__lastTwoTapped || [];
+  if(taps.length < 2){ toast('请先在日历上点两个日期（起始和结束）Tap two dates on the calendar first'); return; }
+  const [a,b] = taps;
+  const start = a<b? a:b, end = a<b? b:a;
+  fillDocDateRange(start, end);
 }
 function toggleDocCalDate(ds){
   if(!window.__visits) window.__visits=[];
+  if(!window.__lastTwoTapped) window.__lastTwoTapped = [];
+  window.__lastTwoTapped.push(ds);
+  if(window.__lastTwoTapped.length>2) window.__lastTwoTapped.shift();
   const hasDate = window.__visits.some(v=>v.date===ds);
   if(hasDate){ window.__visits = window.__visits.filter(v=>v.date!==ds); }
   else {
