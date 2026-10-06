@@ -620,7 +620,7 @@ function bonusCardHTML(){
   const bar = (pct,color)=>`<div style="height:7px; background:var(--card-alt); border-radius:6px; overflow:hidden; margin:5px 0 3px;"><div style="height:100%; width:${pct.toFixed(1)}%; background:${color}; border-radius:6px;"></div></div>`;
   return `<div class="card" style="padding:14px 18px; margin-bottom:16px;">
     <div class="row" style="margin-bottom:10px;">
-      <span style="font-weight:800;">🎁 里程奖金 Mileage Bonus</span>
+      <span style="font-weight:800;">🎁 里程碑奖金 Milestone Bonus</span>
       <span style="font-weight:800; color:var(--peach-dark); font-size:16px;">${fmt(b.available)}</span>
     </div>
     ${b.svcEvery? `<div style="font-size:12.5px; margin-bottom:10px;">
@@ -3325,7 +3325,7 @@ function settingsHTML(){
   <div class="row" style="gap:10px;"><div style="flex:1;"><label class="flabel">CCTV 每日租金 (RM)</label><input type="number" id="f_s_cctvRate" value="${s.cctvDailyRate}"></div><div style="flex:1;"><label class="flabel">默认定金比例 (%)</label><input type="number" id="f_s_deposit" value="${s.depositPercent}"></div></div>
 
   <div class="divider"></div>
-  <h3>🎁 里程奖金规则 Mileage Bonus</h3>
+  <h3>🎁 里程碑奖金规则 Milestone Bonus</h3>
   <div class="row" style="gap:10px;"><div style="flex:1;"><label class="flabel">每多少次服务</label><input type="number" id="f_s_bonusSvcEvery" value="${s.bonusSvcEvery??50}"></div><div style="flex:1;"><label class="flabel">奖金 (RM)</label><input type="number" id="f_s_bonusSvcAmt" value="${s.bonusSvcAmt??200}"></div></div>
   <div class="row" style="gap:10px;"><div style="flex:1;"><label class="flabel">收入每增加 (RM)</label><input type="number" id="f_s_bonusIncEvery" value="${s.bonusIncEvery??5000}"></div><div style="flex:1;"><label class="flabel">奖金 (RM)</label><input type="number" id="f_s_bonusIncAmt" value="${s.bonusIncAmt??500}"></div></div>
   <div class="muted" style="font-size:12px; margin-bottom:8px;">填0就是关闭那一条规则。</div>
