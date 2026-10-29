@@ -250,10 +250,22 @@ const DEFAULT_HOLIDAYS = [
   {date:'2027-12-11', name:"Sultan of Selangor's Birthday"},
   {date:'2027-12-25', name:'Christmas Day'},
 ];
+function addonFee(v){
+  const s=DB.settings||{};
+  return (v&&v.houseClean? (s.houseCleanFee!=null?Number(s.houseCleanFee):20) : 0) + (v&&v.litterClean? (s.litterCleanFee!=null?Number(s.litterCleanFee):10) : 0);
+}
+function addonLines(v,isEN){
+  const s=DB.settings||{}, out=[];
+  if(v&&v.houseClean) out.push((isEN?'House cleaning':'屋子清理费')+' +RM'+(s.houseCleanFee!=null?Number(s.houseCleanFee):20));
+  if(v&&v.litterClean) out.push((isEN?'Litter box deep-clean':'猫砂桶清理费')+' +RM'+(s.litterCleanFee!=null?Number(s.litterCleanFee):10));
+  return out;
+}
+function toggleVisitAddon(idx,key,checked){ window.__visits[idx][key]=!!checked; }
 function visitRemarksText(v, isEN){
   const lines=[];
   if(v.tasks && v.tasks.length) v.tasks.forEach((t,i)=> lines.push((i+1)+'. '+(isEN? enOnly(t) : zhOnly(t))));
   else if(v.remarks) lines.push(v.remarks);
+  addonLines(v,isEN).forEach(l=>lines.push('➕ '+l));
   if(v.extraNotes) lines.push(v.extraNotes);
   return lines.join('\n');
 }
@@ -574,7 +586,7 @@ function monthlyFinancials(basis, completedOnly){
       (inv.visits||[]).forEach(v=>{
         const m=(v.date||'').slice(0,7); if(!m) return;
         if(completedOnly && v.date>todayLimit) return;
-        ensure(m).income += Number(v.price)||0;
+        ensure(m).income += (Number(v.price)||0)+addonFee(v);
       });
       if(inv.cctv && inv.cctv.needed){
         const dayRate = Number(inv.cctv.rate)||0;
@@ -1667,7 +1679,7 @@ function holidayPriceExtra(doc){
   return map;
 }
 function docSubtotal(doc){
-  const visitsTotal = (doc.visits||[]).reduce((s,v)=>s+(Number(v.price)||0),0);
+  const visitsTotal = (doc.visits||[]).reduce((s,v)=>s+(Number(v.price)||0)+addonFee(v),0);
   const cctvTotal = (doc.cctv && doc.cctv.needed) ? (Number(doc.cctv.days)||0)*(Number(doc.cctv.rate)||0) : 0;
   const holidayTotal = (doc.holidayFee && doc.holidayFee.needed) ? (Number(doc.holidayFee.amount)||0) : 0;
   return visitsTotal + cctvTotal + holidayTotal;
@@ -2132,6 +2144,9 @@ function renderVisitRows(){
       ${(DB.settings.taskOptions||[]).map((opt,oi)=>`
         <div class="checkline" style="margin-bottom:6px;"><input type="checkbox" ${(v.tasks||[]).includes(opt)?'checked':''} onchange="toggleVisitTask(${idx}, ${oi}, this.checked)"> <span style="font-weight:600;">${opt}</span></div>
       `).join('')}
+      <div class="muted" style="font-size:11.5px; font-weight:800; margin:8px 0 4px;">额外收费项目（勾选后自动加价）</div>
+      <div class="checkline" style="margin-bottom:6px;"><input type="checkbox" ${v.houseClean?'checked':''} onchange="toggleVisitAddon(${idx},'houseClean',this.checked)"> <span style="font-weight:600;">屋子清理费 House cleaning (+RM${DB.settings.houseCleanFee!=null?DB.settings.houseCleanFee:20})</span></div>
+      <div class="checkline" style="margin-bottom:6px;"><input type="checkbox" ${v.litterClean?'checked':''} onchange="toggleVisitAddon(${idx},'litterClean',this.checked)"> <span style="font-weight:600;">猫砂桶清理费 Litter box clean (+RM${DB.settings.litterCleanFee!=null?DB.settings.litterCleanFee:10})</span></div>
       <textarea placeholder="其他备注（此次特别事项）" style="min-height:36px; margin-bottom:0;" oninput="window.__visits[${idx}].extraNotes=this.value">${v.extraNotes||v.remarks||''}</textarea>
     </div>
   `).join('');
@@ -2409,7 +2424,7 @@ function renderDocDetail(type, id){
   const doc = list.find(x=>x.id===id);
   if(!doc){ if(type==='invoice') state.invId=null; else state.quoteId=null; return renderDocList(type); }
   const c = DB.clients.find(x=>x.id===doc.clientId);
-  const visitsTotal = (doc.visits||[]).reduce((s,v)=>s+(Number(v.price)||0),0);
+  const visitsTotal = (doc.visits||[]).reduce((s,v)=>s+(Number(v.price)||0)+addonFee(v),0);
   const cctvTotal = (doc.cctv&&doc.cctv.needed)? (Number(doc.cctv.days)||0)*(Number(doc.cctv.rate)||0) : 0;
   const holidayTotal = (doc.holidayFee&&doc.holidayFee.needed)? (Number(doc.holidayFee.amount)||0) : 0;
   const subtotal = visitsTotal+cctvTotal+holidayTotal;
@@ -2429,7 +2444,7 @@ function renderDocDetail(type, id){
     <div class="muted">服务日期：${doc.startDate||'—'} ~ ${doc.endDate||'—'}（${(doc.visits||[]).length}天） · 时间段：${doc.timeSlot||'—'}</div>
     <div class="divider"></div>
     <table class="simple"><tr><th>日期</th><th>星期</th><th>时间段</th><th>价格</th></tr>
-    ${(()=>{ const hExtra = holidayPriceExtra(doc); return (doc.visits||[]).map(v=>{ const extra = hExtra[v.id||v.date]||0; return `<tr><td>${v.date}<div class="muted" style="font-size:11px; white-space:pre-line;">${visitRemarksText(v, state.lang==='en')}${extra? `<br>🎉 含节日费 +${fmt(extra)}`:''}</div></td><td>${dowLabel(v.date, state.lang==='en')}</td><td>${v.timeSlot||''}</td><td>${fmt((Number(v.price)||0)+extra)}</td></tr>`; }).join(''); })()}
+    ${(()=>{ const hExtra = holidayPriceExtra(doc); return (doc.visits||[]).map(v=>{ const extra = hExtra[v.id||v.date]||0; return `<tr><td>${v.date}<div class="muted" style="font-size:11px; white-space:pre-line;">${visitRemarksText(v, state.lang==='en')}${extra? `<br>🎉 含节日费 +${fmt(extra)}`:''}</div></td><td>${dowLabel(v.date, state.lang==='en')}</td><td>${v.timeSlot||''}</td><td>${fmt((Number(v.price)||0)+addonFee(v)+extra)}</td></tr>`; }).join(''); })()}
     ${doc.cctv&&doc.cctv.needed? `<tr><td colspan="3">CCTV 租用 (${doc.cctv.days}天 x ${fmt(doc.cctv.rate)})</td><td>${fmt(cctvTotal)}</td></tr>`:''}
     </table>
     <div class="divider"></div>
@@ -2849,7 +2864,7 @@ function renderReportsFinance(){
     DB.invoices.filter(inv=>!inv.cancelled).forEach(inv=>{
       const c = DB.clients.find(x=>x.id===inv.clientId);
       (inv.visits||[]).forEach(v=>{
-        if((v.date||'').slice(0,7)===sel) visitsInMonth.push({date:v.date, amount:v.price, client:c?c.name:(inv.leadName||'—'), invNo:inv.no, invId:inv.id, visitId:v.id});
+        if((v.date||'').slice(0,7)===sel) visitsInMonth.push({date:v.date, amount:(Number(v.price)||0)+addonFee(v), client:c?c.name:(inv.leadName||'—'), invNo:inv.no, invId:inv.id, visitId:v.id});
       });
     });
     visitsInMonth.sort((a,b)=> (a.date||'').localeCompare(b.date||''));
@@ -2977,7 +2992,7 @@ function genPDF(type, id, mode){
   const doc = type==='invoice' ? DB.invoices.find(x=>x.id===id) : DB.quotes.find(x=>x.id===id);
   const c = DB.clients.find(x=>x.id===doc.clientId) || {};
   const pets = c.pets || [];
-  const visitsTotal = (doc.visits||[]).reduce((s,v)=>s+(Number(v.price)||0),0);
+  const visitsTotal = (doc.visits||[]).reduce((s,v)=>s+(Number(v.price)||0)+addonFee(v),0);
   const cctvOn = doc.cctv && doc.cctv.needed;
   const cctvTotal = cctvOn? (Number(doc.cctv.days)||0)*(Number(doc.cctv.rate)||0) : 0;
   const holidayOn = doc.holidayFee && doc.holidayFee.needed;
@@ -3004,7 +3019,7 @@ function genPDF(type, id, mode){
       <td style="padding:8px 6px; border-top:1px solid #EDE2D0;">${dowLabel(v.date, isEN)}</td>
       <td style="padding:8px 6px; border-top:1px solid #EDE2D0; background:#F4ECDF;">${v.timeSlot||''}</td>
       <td style="padding:8px 6px; border-top:1px solid #EDE2D0; background:#F4ECDF; white-space:pre-line; font-size:12px;">${visitRemarksText(v, isEN).replace(/</g,'&lt;')}${extra? `<br>🎉 ${isEN?'Incl. holiday fee':'含节日费'} +${fmt(extra)}`:''}</td>
-      <td style="padding:8px 6px; border-top:1px solid #EDE2D0; text-align:right; font-weight:700;">${fmt((Number(v.price)||0)+extra)}</td>
+      <td style="padding:8px 6px; border-top:1px solid #EDE2D0; text-align:right; font-weight:700;">${fmt((Number(v.price)||0)+addonFee(v)+extra)}</td>
     </tr>`;}).join('');
   const cctvRow = cctvOn? `
     <tr>
@@ -3494,7 +3509,7 @@ function exportToExcel(){
     DB.invoices.forEach(inv=>{
       const c = DB.clients.find(x=>x.id===inv.clientId);
       (inv.visits||[]).forEach(v=>{
-        visitRows.push({ '账单号 No': inv.no, '客户 Client': c?c.name:(inv.leadName||''), '日期 Date': v.date, '时间段 Time Slot': v.timeSlot||'', '价格 Price': v.price||0 });
+        visitRows.push({ '账单号 No': inv.no, '客户 Client': c?c.name:(inv.leadName||''), '日期 Date': v.date, '时间段 Time Slot': v.timeSlot||'', '价格 Price': (Number(v.price)||0)+addonFee(v) });
       });
     });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(visitRows), 'Services 服务记录');
